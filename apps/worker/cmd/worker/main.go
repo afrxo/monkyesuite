@@ -1,11 +1,8 @@
 // Command worker is the monkyesuite scraper + derive orchestrator (Railway).
 //
-// A single persistent process driving all scheduled scraping and derivation on
-// one tiered tick loop (see specs/01-ingestion.md). Go is deliberate: the fetch
-// fan-out is I/O-concurrency-bound; all aggregation stays in Postgres.
-//
-// This is the scaffold entrypoint — the tick loop is wired but every job is a
-// no-op placeholder until phase 01 lands.
+// A single persistent process driving all scheduled scraping on one tiered tick
+// loop (specs/01-ingestion.md). Go is deliberate: the fetch fan-out is
+// I/O-concurrency-bound; all aggregation stays in Postgres.
 package main
 
 import (
@@ -13,10 +10,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"monkyesuite/worker/internal/jobs"
+	"monkyesuite/worker/internal/roblox"
 	"monkyesuite/worker/internal/sched"
+	"monkyesuite/worker/internal/store"
 )
 
 func main() {
@@ -28,18 +29,58 @@ func main() {
 	defer stop()
 
 	// DATABASE_URL is the SERVICE role (RLS bypass) — the worker writes only
-	// global scraped tables. Read here so a misconfig fails fast at boot; the
-	// pgx pool is wired in phase 01 via internal/store.
-	if os.Getenv("DATABASE_URL") == "" {
-		slog.Warn("DATABASE_URL is unset; store writes will be skipped (scaffold)")
+	// global scraped tables. Absent → run with no store (jobs log and skip).
+	var st *store.Store
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		s, err := store.New(ctx, dsn)
+		if err != nil {
+			slog.Error("store connect failed", "err", err)
+			os.Exit(1)
+		}
+		defer s.Close()
+		st = s
+		slog.Info("store connected")
+	} else {
+		slog.Warn("DATABASE_URL unset; jobs will skip DB writes")
 	}
 
-	loop := sched.New(jobs.Default())
-	slog.Info("worker starting", "interval", sched.TickInterval.String())
+	client := roblox.New(roblox.WithLogger(log))
+	reg := jobs.Default(jobs.Deps{Client: client, Store: st})
+
+	// WORKER_TICK_INTERVAL overrides the 5-minute cadence for local/demo runs.
+	interval := sched.TickInterval
+	if v := os.Getenv("WORKER_TICK_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			interval = d
+		} else {
+			slog.Warn("bad WORKER_TICK_INTERVAL, using default", "value", v, "err", err)
+		}
+	}
+	loop := sched.NewWithInterval(reg, interval)
+
+	// WORKER_DAY_TICKS / WORKER_HOUR_TICKS override the tier moduli for local/demo
+	// runs (e.g. fire the daily enrich tier on a warmed-up system, not only tick 0).
+	loop.WithTierTicks(envUint("WORKER_HOUR_TICKS"), envUint("WORKER_DAY_TICKS"))
+	slog.Info("worker starting", "interval", interval.String())
 
 	if err := loop.Run(ctx); err != nil && ctx.Err() == nil {
 		slog.Error("worker exited with error", "err", err)
 		os.Exit(1)
 	}
 	slog.Info("worker stopped")
+}
+
+// envUint parses a small unsigned override from env; 0 (or unset/invalid) means
+// "keep the default".
+func envUint(key string) uint64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.ParseUint(v, 10, 64)
+	if err != nil {
+		slog.Warn("ignoring bad env override", "key", key, "value", v, "err", err)
+		return 0
+	}
+	return n
 }
