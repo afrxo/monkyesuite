@@ -1,4 +1,6 @@
 // @monkyesuite/shared — shared TS types, Zod schemas, constants (API + web only).
-// Scaffold placeholder; populated per spec area. NOT imported by the Go worker.
+// NOT imported by the Go worker.
 
-export {};
+export * from "./dto.js";
+export * from "./enums.js";
+export * from "./query.js";

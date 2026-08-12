@@ -1,16 +1,16 @@
 // @monkyesuite/api — HTTP API + auth boundary (Railway).
-// The authorization chokepoint: every scoped handler resolves membership, and
-// opens each request tx with `SET LOCAL app.current_user_id`. See specs/06, 07.
-// Scaffold entrypoint; handlers land per spec. Proves workspace wiring resolves.
+// Boots the Hono app and serves it on Node. Global read routes are live here;
+// scoped/auth'd routes land with identity/access (specs/06). See app.ts.
 
-import { createDatabase } from "@monkyesuite/database";
+import "dotenv/config";
+import { serve } from "@hono/node-server";
+import { createApp } from "./app.js";
 
-const url = process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL;
-if (!url) {
-  throw new Error("APP_DATABASE_URL (or DATABASE_URL) is required");
-}
+const port = Number(process.env.PORT ?? 8787);
+const app = createApp();
 
-// The API connects as the restricted APP role (RLS enforced).
-export const db = createDatabase(url);
-
-console.log("[api] scaffold booted (no routes yet)");
+serve({ fetch: app.fetch, port }, (info) => {
+  console.log(
+    `[api] listening on http://localhost:${info.port} (global reads)`,
+  );
+});
