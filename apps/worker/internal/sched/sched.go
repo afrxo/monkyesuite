@@ -1,9 +1,10 @@
 // Package sched drives the tiered tick loop: one timer, several cadences.
 //
 // From specs/00-overview.md:
-//   every tick   (5 min):  discover · snapshot · events (bucketed)
-//   every 12     (~hourly): hourly rollup · cohort percentiles
-//   every 288    (~daily):  enrich fan-out · lift baseline · trend-drift
+//
+//	every tick   (5 min):  discover · snapshot · events (bucketed)
+//	every 12     (~hourly): hourly rollup · cohort percentiles
+//	every 288    (~daily):  enrich fan-out · lift baseline · trend-drift
 //
 // The loop owns cadence only. Each job guards itself with a context deadline
 // shorter than the tick interval so a tick never overruns into the next.
@@ -33,20 +34,47 @@ type Job interface {
 
 // Registry groups jobs by cadence tier.
 type Registry struct {
-	EveryTick  []Job // discover, snapshot, events
-	EveryHour  []Job // rollups, cohort percentiles
-	EveryDay   []Job // enrich, baselines, trend-drift
+	EveryTick []Job // discover, snapshot, events
+	EveryHour []Job // rollups, cohort percentiles
+	EveryDay  []Job // enrich, baselines, trend-drift
 }
 
-// Loop runs the registered jobs on the tiered cadence.
+// Loop runs the registered jobs on the tiered cadence. hourTicks/dayTicks are
+// the tier moduli; they default to TicksPerHour/TicksPerDay but are overridable
+// for local/demo runs (e.g. to fire the daily enrich tier on a warmed-up system
+// rather than only at tick 0).
 type Loop struct {
-	reg      Registry
-	interval time.Duration
+	reg       Registry
+	interval  time.Duration
+	hourTicks uint64
+	dayTicks  uint64
 }
 
-// New builds a Loop at the default TickInterval.
+// New builds a Loop at the default TickInterval and tier moduli.
 func New(reg Registry) *Loop {
-	return &Loop{reg: reg, interval: TickInterval}
+	return NewWithInterval(reg, TickInterval)
+}
+
+// NewWithInterval builds a Loop at a custom base cadence with default tier
+// moduli. Used to drive fast ticks in local/demo runs; production uses the
+// default 5-minute TickInterval.
+func NewWithInterval(reg Registry, interval time.Duration) *Loop {
+	if interval <= 0 {
+		interval = TickInterval
+	}
+	return &Loop{reg: reg, interval: interval, hourTicks: TicksPerHour, dayTicks: TicksPerDay}
+}
+
+// WithTierTicks overrides the hourly/daily tier moduli (0 = keep default). A
+// local/demo affordance only — production keeps 12 / 288.
+func (l *Loop) WithTierTicks(hourTicks, dayTicks uint64) *Loop {
+	if hourTicks > 0 {
+		l.hourTicks = hourTicks
+	}
+	if dayTicks > 0 {
+		l.dayTicks = dayTicks
+	}
+	return l
 }
 
 // Run blocks until ctx is cancelled, firing the appropriate tiers each tick.
@@ -73,10 +101,10 @@ func (l *Loop) Run(ctx context.Context) error {
 // hourly/daily tiers run in addition to the every-tick jobs.
 func (l *Loop) fire(ctx context.Context, tick uint64) {
 	l.runAll(ctx, tick, l.reg.EveryTick)
-	if tick%TicksPerHour == 0 {
+	if l.hourTicks > 0 && tick%l.hourTicks == 0 {
 		l.runAll(ctx, tick, l.reg.EveryHour)
 	}
-	if tick%TicksPerDay == 0 {
+	if l.dayTicks > 0 && tick%l.dayTicks == 0 {
 		l.runAll(ctx, tick, l.reg.EveryDay)
 	}
 }

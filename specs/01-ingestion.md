@@ -23,7 +23,13 @@ apps/worker/
 
 Every outbound Roblox call goes through one client:
 
-1. **Rate limit first.** A `golang.org/x/time/rate.Limiter` sized to **60 requests / 10s**, shared across all jobs and goroutines. If a token isn't immediately available, **skip and return no result** (don't block the tick waiting) — a politeness gate.
+1. **Rate limit first — a two-tier budget.** Two **independent** `golang.org/x/time/rate` limiters, one per tier:
+   - **critical: 40 requests / 10s** — discover · snapshot · events draw from this pool.
+   - **enrich: 20 requests / 10s** — the daily enrich drain draws from this pool.
+
+   The pools share no tokens, so a saturated enrich drain **can never spend a critical-path token**: the every-tick jobs always have their full 40/10s, and a snapshot always completes on time even mid-drain. The **aggregate** to Roblox is bounded by the sum — burst 60, sustained **60 req/10s** — so the politeness ceiling to Roblox is preserved exactly. Each call gates on its own tier's limiter; if a token isn't immediately available, **skip and return no result** (don't block the tick waiting).
+
+   > Independent pools are load-bearing, not cosmetic. A *single* shared 60/10s limiter with an enrich sub-cap does **not** hold: because each call skips rather than waits, a shared burst transiently drained by the drain zeroes a whole snapshot even while enrich stays within its sub-cap. Separate pools are what actually reserve the tick's budget — see §1.5.
 2. **Fetch** with `User-Agent: monkyesuite-worker/1.0`, a `context.Context` deadline per request, and exponential backoff with jitter on 5xx/network errors, bounded by a per-tick retry budget.
 3. **Decode** into typed structs; reject malformed payloads before they reach the store.
 4. **Log** endpoint · status · latency · batch size (structured, e.g. `slog`).
@@ -32,7 +38,9 @@ Every outbound Roblox call goes through one client:
 
 ## Step 1.1 — Discover (every tick) — *what games exist*
 
-**Endpoint:** `apis.roblox.com/explore-api/v1/get-sort-content?sortId=<cat>`
+**Endpoint:** `apis.roblox.com/explore-api/v1/get-sort-content?sessionId=<guid>&sortId=<cat>`
+
+> **`sessionId` is required.** The endpoint returns **HTTP 400** (`{"errors":{"sessionId":["The SessionId field is required."]}}`) with `sortId` alone. It is a **client-generated GUID**; Roblox accepts any well-formed v4 GUID and does not tie sort ranking to it (verified: the same category returns an identical ranked set whether the `sessionId` is reused or freshly minted — it's a personalization/analytics session key, not a pagination cursor). The worker generates **one GUID at process start and reuses it for the whole run** (regenerated per run / restart). A stable per-run session is deliberate: it keeps the discovery stream coherent for Roblox-side analytics without ever masking or reordering the games we scrape.
 
 Loop these **9 sort categories** every tick (concurrently, under the limiter):
 
@@ -101,6 +109,7 @@ Fan every tracked game into the **`enrich_jobs`** work table (`id`, `kind`, `tar
 - **429 / partial batch.** Back off within budget, then skip the id to the next tick — a gap is data, not a crash. Persist whatever decoded; log the rest.
 - **Private/deleted game.** Emit a null metrics row (gap ≠ genuine zero downstream) or carry-forward per 1.2.
 - **Tick safety.** A tick must never overrun into the next; guard each job with a `context` deadline shorter than the tick interval.
+- **Enrich must never starve a snapshot.** The daily enrich drain is long-running and detached (§1.4); on a shared, unprioritized limiter its thousands of gated calls would consume the whole budget and force snapshot to carry every game forward — turning real CCU movement into a flat line for the duration, a daily blind spot on the load-bearing signal. The two-tier budget (§1.0) prevents this structurally: enrich draws from its **own** 20 req/10s pool while the critical path keeps its **own** 40 req/10s pool, and the two share no tokens — so a snapshot always completes on time even while a drain runs full-tilt. Carry-forward stays a genuine-gap mechanism, not a symptom of self-inflicted starvation.
 
 ## API surface (reference)
 
