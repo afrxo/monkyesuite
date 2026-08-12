@@ -1,0 +1,5 @@
+packages:
+  - "apps/api"
+  - "apps/web"
+  - "packages/*"
+# apps/worker is a separate Go module, intentionally NOT in the pnpm workspace.

@@ -1,0 +1,24 @@
+{
+  "name": "monkyesuite",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "db:generate": "pnpm --filter @monkyesuite/database db:generate",
+    "db:migrate": "pnpm --filter @monkyesuite/database db:migrate",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.8",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
