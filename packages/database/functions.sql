@@ -162,6 +162,53 @@ create or replace function remove_member(p_project uuid, p_user text)
   end;
   $$;
 
+-- ---------------------------------------------------------------------------
+-- Admin-panel invite creation (specs/09 §9.3a).
+--
+-- The admin role is GLOBAL and deliberately confers no project membership, so
+-- an admin inserting into `invites` resolves zero rows under the owner-gated
+-- policy. The two obvious "fixes" are both wrong: weakening the invites policy
+-- widens it for every caller, and fabricating a membership row for the admin
+-- blurs the global/scoped realms. Instead the privileged insert lives here,
+-- exactly like the other membership writes above — the policies stay untouched.
+--
+-- The collaborator cap is enforced INSIDE the function, not by the caller, so
+-- the admin path cannot route around the rule the owner path obeys. The caller
+-- (apps/api /admin) is the primary gate: requireAdmin runs before this is ever
+-- called, and the token is generated caller-side to reuse the existing invite
+-- flow verbatim.
+create or replace function admin_create_invite(
+    p_project uuid, p_email text, p_role text, p_invited_by text,
+    p_token text, p_expires_at timestamptz
+  ) returns table (code text, invite_id uuid)
+  language plpgsql security definer set search_path = public as $$
+  declare
+    seats_used int;
+    new_id uuid;
+  begin
+    if not exists (select 1 from projects where id = p_project) then
+      return query select 'no_project'::text, null::uuid;
+      return;
+    end if;
+
+    -- Same seat arithmetic as the owner-gated route: existing member
+    -- collaborators plus still-pending invites must stay under the cap of two.
+    select (select count(*) from memberships where project_id = p_project and role = 'member')
+         + (select count(*) from invites where project_id = p_project and status = 'pending')
+      into seats_used;
+    if p_role = 'member' and seats_used >= 2 then
+      return query select 'cap'::text, null::uuid;
+      return;
+    end if;
+
+    insert into invites (project_id, email, role, token, invited_by, expires_at)
+      values (p_project, p_email, p_role::member_role, p_token, p_invited_by, p_expires_at)
+      returning id into new_id;
+
+    return query select 'ok'::text, new_id;
+  end;
+  $$;
+
 -- Not world-executable. roles.sql grants EXECUTE to the app role only; the
 -- service role bypasses RLS and never needs these.
 revoke all on function is_project_member(uuid) from public;
@@ -169,3 +216,4 @@ revoke all on function is_project_owner(uuid) from public;
 revoke all on function project_exists(uuid) from public;
 revoke all on function project_of_invite(uuid) from public;
 revoke all on function accept_invite(text, text) from public;
+revoke all on function admin_create_invite(uuid, text, text, text, text, timestamptz) from public;

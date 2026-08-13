@@ -3,15 +3,19 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"monkyesuite/worker/internal/roblox"
+	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
+	"monkyesuite/worker/internal/telemetry"
 )
 
 const (
@@ -46,10 +50,23 @@ type enrichJob struct {
 
 func (j *enrichJob) Name() string { return "enrich" }
 
-func (j *enrichJob) Run(ctx context.Context, tick uint64) error {
+// Tier marks enrich as drawing from the independent enrich limiter pool, so the
+// admin panel can split token consumption by tier and verify the critical path's
+// reservation is holding (specs/01 §1.0, specs/09 §9.4.3).
+func (j *enrichJob) Tier() string { return sched.TierEnrich }
+
+// DrainJobName is the job_runs name for the detached drain. It is recorded
+// separately from the `enrich` enqueue row on purpose: the enqueue is two cheap
+// writes inside the tick, while the drain is thousands of gated calls running
+// long after the tick returned. Folding them into one row would either lose the
+// drain's call counters (the enrich tier would read as zero in the limiter
+// panel) or misattribute its duration to the tick.
+const DrainJobName = "enrich-drain"
+
+func (j *enrichJob) Run(ctx context.Context, tick uint64) (sched.Result, error) {
 	if j.d.Store == nil {
 		slog.Warn("enrich skipped: no store")
-		return nil
+		return sched.Result{Skipped: true, Metrics: enrichMetrics(drainCounts{})}, nil
 	}
 	// Enqueue quickly under a short deadline; this part is allowed to block the
 	// tick because it's a couple of cheap writes.
@@ -58,45 +75,118 @@ func (j *enrichJob) Run(ctx context.Context, tick uint64) error {
 
 	tracked, err := j.d.Store.TrackedUniverseIDs(enqCtx)
 	if err != nil {
-		return err
+		return sched.Result{Metrics: enrichMetrics(drainCounts{})}, err
 	}
 	if err := j.d.Store.EnqueueEnrich(enqCtx, "universe", tracked); err != nil {
-		return err
+		return sched.Result{Metrics: enrichMetrics(drainCounts{})}, err
 	}
 	creators, err := j.d.Store.TrackedCreatorRefs(enqCtx)
 	if err != nil {
-		return err
+		return sched.Result{Metrics: enrichMetrics(drainCounts{})}, err
 	}
 	creatorIDs := make([]int64, len(creators))
 	for i, c := range creators {
 		creatorIDs[i] = c.CreatorID
 	}
 	if err := j.d.Store.EnqueueEnrich(enqCtx, "creator", creatorIDs); err != nil {
-		return err
+		return sched.Result{Metrics: enrichMetrics(drainCounts{})}, err
 	}
 	slog.Info("enrich enqueued", "tick", tick, "universes", len(tracked), "creators", len(creatorIDs))
+
+	// The enqueue row carries the §9.6 enrich keys at zero (the drain hasn't run
+	// yet) plus what this phase actually did.
+	m := enrichMetrics(drainCounts{})
+	m["enqueuedUniverses"] = len(tracked)
+	m["enqueuedCreators"] = len(creatorIDs)
+	res := sched.Result{RowsWritten: len(tracked) + len(creatorIDs), Metrics: m}
 
 	// Drain detached. ctx here is the long-lived loop context (cancelled only on
 	// worker shutdown), NOT the per-tick deadline — so returning now lets the
 	// next tick fire while the drain continues in the background.
 	if !j.draining.CompareAndSwap(false, true) {
 		slog.Info("enrich: drain already in flight, queue topped up", "tick", tick)
-		return nil
+		return res, nil
 	}
 	go func() {
 		defer j.draining.Store(false)
 		drainCtx, cancel := context.WithTimeout(ctx, drainBudget)
 		defer cancel()
-		n := j.drain(drainCtx)
-		slog.Info("enrich drain finished", "processed", n)
+		j.runDrain(drainCtx, tick)
 	}()
-	return nil
+	return res, nil
+}
+
+// runDrain executes the detached drain and records its own job_runs row. The
+// scheduler can't do it: by the time the drain finishes, the tick that spawned
+// it returned long ago.
+func (j *enrichJob) runDrain(ctx context.Context, tick uint64) {
+	ctr := telemetry.NewCounter()
+	started := time.Now().UTC()
+	counts := j.drain(telemetry.WithCounter(ctx, ctr))
+	finished := time.Now().UTC()
+	slog.Info("enrich drain finished", "processed", counts.claimed, "done", counts.done, "failed", counts.failed)
+
+	run := sched.Run{
+		Job:         DrainJobName,
+		Tick:        tick,
+		Tier:        sched.TierEnrich,
+		StartedAt:   started,
+		FinishedAt:  finished,
+		DurationMs:  int(finished.Sub(started).Milliseconds()),
+		Status:      "ok",
+		RowsWritten: counts.done,
+		Metrics:     ctr.Fold(enrichMetrics(counts)),
+	}
+	// Detached from the drain budget: a drain that ended because its context
+	// expired must still be able to report that it did.
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := j.d.Store.RecordJobRun(wctx, run); err != nil {
+		slog.Warn("enrich: drain job_runs write failed", "err", err)
+	}
+}
+
+// drainCounts tallies one drain. Per-kind is split because the two kinds fail
+// for different upstreams: `universe` failures point at rotunnel, `creator`
+// failures at the Studio/Groups endpoints (specs/09 §9.4.2).
+type drainCounts struct {
+	claimed, done, failed  int
+	byKindDone, byKindFail map[string]int
+}
+
+// drainTally is the concurrent accumulator behind drainCounts — the drain pool
+// records from EnrichConcurrency goroutines at once.
+type drainTally struct {
+	mu sync.Mutex
+	c  drainCounts
+}
+
+func (t *drainTally) record(kind string, ok bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.c.byKindDone == nil {
+		t.c.byKindDone, t.c.byKindFail = map[string]int{}, map[string]int{}
+	}
+	t.c.claimed++
+	if ok {
+		t.c.done++
+		t.c.byKindDone[kind]++
+		return
+	}
+	t.c.failed++
+	t.c.byKindFail[kind]++
+}
+
+func (t *drainTally) snapshot() drainCounts {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.c
 }
 
 // drain runs EnrichConcurrency workers, each claiming rows until the queue is
-// empty or ctx expires. Returns the number of jobs processed.
-func (j *enrichJob) drain(ctx context.Context) int {
-	var processed atomic.Int64
+// empty or ctx expires.
+func (j *enrichJob) drain(ctx context.Context) drainCounts {
+	var tally drainTally
 	g, gctx := errgroup.WithContext(ctx)
 	for i := 0; i < EnrichConcurrency; i++ {
 		g.Go(func() error {
@@ -112,18 +202,17 @@ func (j *enrichJob) drain(ctx context.Context) int {
 				if jb == nil {
 					return nil // queue drained
 				}
-				j.process(gctx, jb)
-				processed.Add(1)
+				tally.record(jb.Kind, j.process(gctx, jb))
 			}
 		})
 	}
 	_ = g.Wait()
-	return int(processed.Load())
+	return tally.snapshot()
 }
 
 // process runs one claimed job and marks it done or failed (with dead-lettering
-// once the retry budget is spent).
-func (j *enrichJob) process(ctx context.Context, jb *store.EnrichJob) {
+// once the retry budget is spent). Reports whether it succeeded.
+func (j *enrichJob) process(ctx context.Context, jb *store.EnrichJob) bool {
 	var err error
 	switch jb.Kind {
 	case "universe":
@@ -131,17 +220,39 @@ func (j *enrichJob) process(ctx context.Context, jb *store.EnrichJob) {
 	case "creator":
 		err = j.enrichCreator(ctx, jb.TargetID)
 	default:
+		err = fmt.Errorf("unknown job kind %q", jb.Kind)
 		slog.Warn("enrich: unknown job kind", "kind", jb.Kind)
 	}
 	if err != nil {
 		slog.Warn("enrich: job failed", "kind", jb.Kind, "target", jb.TargetID, "attempts", jb.Attempts, "err", err)
-		if ferr := j.d.Store.FailEnrich(ctx, jb.ID, jb.Attempts, EnrichRetryBudget, enrichRetryBackoff); ferr != nil {
+		// The cause rides onto the row: a dead-letter with attempts but no reason
+		// is unactionable in the admin queue panel (specs/09 §9.4.2).
+		if ferr := j.d.Store.FailEnrich(ctx, jb.ID, jb.Attempts, EnrichRetryBudget, enrichRetryBackoff, err); ferr != nil {
 			slog.Warn("enrich: mark-failed errored", "id", jb.ID, "err", ferr)
 		}
-		return
+		return false
 	}
 	if err := j.d.Store.CompleteEnrich(ctx, jb.ID); err != nil {
 		slog.Warn("enrich: mark-done errored", "id", jb.ID, "err", err)
+	}
+	return true
+}
+
+// enrichMetrics is the §9.6 contract for the enrich job and its drain.
+func enrichMetrics(c drainCounts) map[string]any {
+	done, fail := c.byKindDone, c.byKindFail
+	if done == nil {
+		done = map[string]int{}
+	}
+	if fail == nil {
+		fail = map[string]int{}
+	}
+	return map[string]any{
+		"claimed":    c.claimed,
+		"done":       c.done,
+		"failed":     c.failed,
+		"byKindDone": done,
+		"byKindFail": fail,
 	}
 }
 

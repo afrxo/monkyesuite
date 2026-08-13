@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"monkyesuite/worker/internal/roblox"
+	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
 )
 
@@ -24,19 +25,19 @@ type eventsJob struct{ d Deps }
 
 func (j *eventsJob) Name() string { return "events" }
 
-func (j *eventsJob) Run(ctx context.Context, tick uint64) error {
+func (j *eventsJob) Run(ctx context.Context, tick uint64) (sched.Result, error) {
+	bucket := int64(tick % 12)
 	if j.d.Store == nil {
 		slog.Warn("events skipped: no store")
-		return nil
+		return sched.Result{Skipped: true, Metrics: eventsMetrics(bucket, 0, 0)}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 
 	tracked, err := j.d.Store.TrackedUniverseIDs(ctx)
 	if err != nil {
-		return err
+		return sched.Result{Metrics: eventsMetrics(bucket, 0, 0)}, err
 	}
-	bucket := int64(tick % 12)
 	var due []int64
 	for _, id := range tracked {
 		if id%12 == bucket {
@@ -45,7 +46,7 @@ func (j *eventsJob) Run(ctx context.Context, tick uint64) error {
 	}
 	if len(due) == 0 {
 		slog.Info("events: no games in bucket", "tick", tick, "bucket", bucket)
-		return nil
+		return sched.Result{Metrics: eventsMetrics(bucket, 0, 0)}, nil
 	}
 
 	now := time.Now().UTC()
@@ -94,7 +95,21 @@ func (j *eventsJob) Run(ctx context.Context, tick uint64) error {
 		slog.Warn("events: lifecycle insert failed", "err", err)
 	}
 	slog.Info("events done", "tick", tick, "bucket", bucket, "games", len(due), "events", total, "shipped", len(shipped))
-	return nil
+	return sched.Result{
+		RowsWritten: total + len(shipped),
+		Metrics:     eventsMetrics(bucket, len(due), total),
+	}, nil
+}
+
+// eventsMetrics is the §9.6 contract for this job. `bucket` is recorded so a
+// gap is readable: this job polls only universeId %% 12 == tick %% 12 (§1.3), so
+// "few games polled" is expected on some ticks and alarming on others.
+func eventsMetrics(bucket int64, gamesPolled, eventsUpserted int) map[string]any {
+	return map[string]any{
+		"bucket":         bucket,
+		"gamesPolled":    gamesPolled,
+		"eventsUpserted": eventsUpserted,
+	}
 }
 
 // resolveThumbnail resolves the first thumbnail mediaId to a CDN URL.

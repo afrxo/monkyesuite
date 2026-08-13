@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"monkyesuite/worker/internal/telemetry"
 )
 
 // UserAgent identifies the worker to Roblox on every request.
@@ -135,11 +137,55 @@ func (c *Client) backoff(n int) time.Duration {
 	return d + jitter
 }
 
-// getJSON gates on the limiter, fetches with retries, and decodes into out.
-// Retryable failures (network, 5xx, 429) are retried within the budget with
-// backoff; 4xx and decode errors fail immediately. Fails soft: the error is
-// returned for the caller to log and skip, never panicking the tick.
+// endpointGroups maps a call's log label to the coarser group the admin panel
+// reports failure rates by (specs/09 §9.4.5). Grouping is deliberate: the two
+// thumbnail calls fail for the same reason, and the panel's question is "which
+// upstream is degrading", not "which URL". Log labels stay as they are.
+var endpointGroups = map[string]string{
+	"explore/get-sort-content": "explore",
+	"games/games":              "games",
+	"games/votes":              "votes",
+	"virtual-events/list":      "virtual-events",
+	"thumbnails/icons":         "thumbnails",
+	"thumbnails/assets":        "thumbnails",
+	"rotunnel/game-passes":     "rotunnel-passes",
+	"rotunnel/dev-products":    "rotunnel-products",
+	"games/creator-games":      "studio-games",
+	"groups/get":               "groups-meta",
+}
+
+// endpointGroup resolves a label to its group, falling back to the label so a
+// newly-added endpoint appears in the panel instead of vanishing from it.
+func endpointGroup(endpoint string) string {
+	if g, ok := endpointGroups[endpoint]; ok {
+		return g
+	}
+	return endpoint
+}
+
+// getJSON gates on the limiter, fetches with retries, decodes into out, and
+// records the outcome against this run's telemetry counter (specs/09 §9.6):
+// a closed gate is `skipped`, a returned error is `fail`, otherwise `ok`.
 func getJSON[T any](ctx context.Context, c *Client, endpoint, url string, out *T) error {
+	err := fetchJSON(ctx, c, endpoint, url, out)
+	ctr := telemetry.FromContext(ctx)
+	group := endpointGroup(endpoint)
+	switch {
+	case errors.Is(err, ErrRateLimited):
+		ctr.Skip(group) // gate shut: never issued, not a failure
+	case err != nil:
+		ctr.Fail(group)
+	default:
+		ctr.OK(group)
+	}
+	return err
+}
+
+// fetchJSON is the call itself. Retryable failures (network, 5xx, 429) are
+// retried within the budget with backoff; 4xx and decode errors fail
+// immediately. Fails soft: the error is returned for the caller to log and
+// skip, never panicking the tick.
+func fetchJSON[T any](ctx context.Context, c *Client, endpoint, url string, out *T) error {
 	// Gate on this client's private tier budget. Because critical and enrich are
 	// independent pools, an exhausted enrich budget skips enrich calls without
 	// ever touching the critical path's reserved tokens (§1.0).
