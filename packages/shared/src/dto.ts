@@ -175,6 +175,15 @@ export interface DemandTerm {
   kind: DemandKind;
   genreLabel: string | null;
   snapshots: DemandSnapshot[];
+  // The payoff flag (specs/04 §4.3): external YouTube velocity is positive while
+  // the matched on-platform CCU is flat or negative — "heating, not yet
+  // reflected." null when no valid match exists (unmapped term → surface for
+  // curation) or the latest snapshot lacks a YouTube view delta.
+  heating: boolean | null;
+  // The on-platform CCU slope the flag was compared against: the matched game's
+  // 7-day slope (game-term) or the genre-aggregate slope (theme-term). null when
+  // no match exists. Included so the surface can label the flag honestly.
+  matchedCcuSlope: number | null;
 }
 
 export interface DemandOverlay {

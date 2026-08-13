@@ -276,6 +276,14 @@ function GameDetailPage() {
                       <span className="ml-1 text-xs text-neutral-600">
                         ({term.kind})
                       </span>
+                      {term.heating ? (
+                        <span
+                          className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-400"
+                          title="External interest rising while on-platform CCU is flat or falling — estimate, not yet reflected on-platform"
+                        >
+                          heating
+                        </span>
+                      ) : null}
                     </span>
                     <span className="tabular-nums text-neutral-400">
                       trends {last?.trendsScore ?? "—"}

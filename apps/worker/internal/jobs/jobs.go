@@ -12,12 +12,17 @@ import (
 	"monkyesuite/worker/internal/roblox"
 	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
+	"monkyesuite/worker/internal/trends"
+	"monkyesuite/worker/internal/youtube"
 )
 
-// Deps are the shared collaborators every job needs.
+// Deps are the shared collaborators every job needs. Youtube/Trends are only
+// used by the daily demand job and may be nil (unconfigured → demand skips).
 type Deps struct {
-	Client *roblox.Client
-	Store  *store.Store
+	Client  *roblox.Client
+	Store   *store.Store
+	Youtube *youtube.Client
+	Trends  *trends.Client
 }
 
 // Default wires the registry to the tiered cadence with real jobs. discover is a
@@ -36,6 +41,9 @@ func Default(d Deps) sched.Registry {
 		EveryDay: []sched.Job{
 			&enrichJob{d: d, client: enrichClient(d.Client)},
 			&trendDriftJob{d},
+			// demand snapshots off-platform interest (YouTube + Trends) daily;
+			// skips itself if no YouTube client is configured.
+			&demandJob{d: d},
 		},
 	}
 }

@@ -18,6 +18,8 @@ import (
 	"monkyesuite/worker/internal/roblox"
 	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
+	"monkyesuite/worker/internal/trends"
+	"monkyesuite/worker/internal/youtube"
 )
 
 func main() {
@@ -45,7 +47,20 @@ func main() {
 	}
 
 	client := roblox.New(roblox.WithLogger(log))
-	reg := jobs.Default(jobs.Deps{Client: client, Store: st})
+
+	// Off-platform demand clients (specs/04). YouTube is skipped when its key is
+	// unset (yt returns nil); Trends is credential-free but disabled with
+	// TRENDS_ENABLED=false since the unofficial endpoint is flaky.
+	yt := youtube.New(os.Getenv("YOUTUBE_API_KEY"), youtube.WithLogger(log))
+	if yt == nil {
+		slog.Warn("YOUTUBE_API_KEY unset; demand job will skip")
+	}
+	var tr *trends.Client
+	if os.Getenv("TRENDS_ENABLED") != "false" {
+		tr = trends.New(trends.WithLogger(log))
+	}
+
+	reg := jobs.Default(jobs.Deps{Client: client, Store: st, Youtube: yt, Trends: tr})
 
 	// WORKER_TICK_INTERVAL overrides the 5-minute cadence for local/demo runs.
 	interval := sched.TickInterval
