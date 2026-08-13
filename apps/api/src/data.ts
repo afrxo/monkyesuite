@@ -501,6 +501,24 @@ export async function getDemand(universeId: number): Promise<DemandOverlay> {
       .from(demandSnapshots)
       .where(eq(demandSnapshots.termId, t.id))
       .orderBy(asc(demandSnapshots.capturedAt));
+
+    // The heating flag (§4.3): compare the latest external view-velocity against
+    // the matched on-platform CCU slope. The comparison slope is the matched
+    // game's 7-day slope (game-term) or the genre aggregate (theme-term); it is
+    // null where no valid on-platform match exists, in which case the flag is
+    // uncomputable and the term surfaces unflagged for curation.
+    const matchedCcuSlope =
+      t.universeId != null
+        ? await gameCcuSlope(t.universeId)
+        : t.genreLabel != null
+          ? await genreCcuSlope(t.genreLabel)
+          : null;
+    const extVelocity = snaps.at(-1)?.ytViewDelta7d ?? null;
+    const heating =
+      extVelocity != null && matchedCcuSlope != null
+        ? extVelocity > 0 && matchedCcuSlope <= 0
+        : null;
+
     overlay.terms.push({
       term: t.term,
       kind: t.kind,
@@ -511,9 +529,48 @@ export async function getDemand(universeId: number): Promise<DemandOverlay> {
         ytViewDelta7d: s.ytViewDelta7d,
         trendsScore: s.trendsScore,
       })),
+      heating,
+      matchedCcuSlope,
     });
   }
   return overlay;
+}
+
+/**
+ * gameCcuSlope — the matched game's latest 7-day CCU slope, the on-platform
+ * comparison for a game-term's heating flag. null when the game has no derived
+ * stats yet.
+ */
+async function gameCcuSlope(universeId: number): Promise<number | null> {
+  const [stat] = await db
+    .select({ ccuSlope7d: gameStats.ccuSlope7d })
+    .from(gameStats)
+    .where(eq(gameStats.universeId, universeId))
+    .orderBy(desc(gameStats.computedAt))
+    .limit(1);
+  return stat?.ccuSlope7d ?? null;
+}
+
+/**
+ * genreCcuSlope — the genre-aggregate 7-day CCU slope for a theme-term: the mean
+ * latest slope across games in that Roblox genre (aggregation in SQL, not in a
+ * JS array). null when no game in the genre has a slope yet.
+ */
+async function genreCcuSlope(genreLabel: string): Promise<number | null> {
+  const latest = db
+    .selectDistinctOn([gameStats.universeId], {
+      universeId: gameStats.universeId,
+      ccuSlope7d: gameStats.ccuSlope7d,
+    })
+    .from(gameStats)
+    .orderBy(gameStats.universeId, desc(gameStats.computedAt))
+    .as("latest");
+  const [row] = await db
+    .select({ slope: sql<number | null>`avg(${latest.ccuSlope7d})` })
+    .from(latest)
+    .innerJoin(games, eq(games.universeId, latest.universeId))
+    .where(eq(games.robloxGenre, genreLabel));
+  return row?.slope ?? null;
 }
 
 /* --------------------------------- tags ----------------------------------- */
