@@ -41,6 +41,25 @@ export type NoteVisibility = (typeof NOTE_VISIBILITIES)[number];
 export const DEMAND_KINDS = ["game", "theme"] as const;
 export type DemandKind = (typeof DEMAND_KINDS)[number];
 
+export const MEMBER_ROLES = ["owner", "member"] as const;
+export type MemberRole = (typeof MEMBER_ROLES)[number];
+
+export const INVITE_STATUSES = [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+] as const;
+export type InviteStatus = (typeof INVITE_STATUSES)[number];
+
+export const PROJECT_STATUSES = [
+  "active",
+  "paused",
+  "shipped",
+  "archived",
+] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
 // Feed sort + discovery surfaces (API contract, not schema enums).
 export const FEED_SORTS = [
   "spike",

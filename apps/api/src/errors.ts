@@ -42,6 +42,17 @@ export const notFound = (message = "Not found.") =>
   new HttpError("not_found", message);
 export const validationError = (message: string) =>
   new HttpError("validation_error", message);
+export const unauthenticated = (message = "Sign in required.") =>
+  new HttpError("unauthenticated", message);
+export const forbidden = (message = "Not permitted.") =>
+  new HttpError("forbidden", message);
+export const conflict = (message: string) => new HttpError("conflict", message);
+export const gone = (message: string) => new HttpError("gone", message);
+
+// Postgres unique-violation (e.g. duplicate project slug) → 409 conflict.
+export function isUniqueViolation(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === "23505";
+}
 
 export function sendError(c: Context, err: HttpError) {
   const body: ApiError = {

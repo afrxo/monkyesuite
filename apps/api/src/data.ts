@@ -42,6 +42,7 @@ import { and, asc, desc, eq, gte, lte, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "./db.js";
 import { iso, isoReq } from "./serialize.js";
+import { type Tx, withUser } from "./tx.js";
 
 /* --------------------------- shared sub-selects --------------------------- */
 
@@ -552,24 +553,33 @@ export async function getGameTags(universeId: number): Promise<Tag[]> {
 /* ------------------------------ game notes -------------------------------- */
 
 // Global/optional read. With no session set, the game_notes RLS policy returns
-// shared notes only; a future signed-in path will set app.current_user_id to
-// add the caller's own private notes and flip isOwn. See docs/api-contract.md.
-export async function getGameNotes(universeId: number): Promise<GameNote[]> {
-  const rows = await db
-    .select({
-      id: gameNotes.id,
-      universeId: gameNotes.universeId,
-      authorId: gameNotes.authorId,
-      authorName: users.name,
-      body: gameNotes.body,
-      visibility: gameNotes.visibility,
-      createdAt: gameNotes.createdAt,
-      updatedAt: gameNotes.updatedAt,
-    })
-    .from(gameNotes)
-    .leftJoin(users, eq(users.id, gameNotes.authorId))
-    .where(eq(gameNotes.universeId, universeId))
-    .orderBy(desc(gameNotes.createdAt));
+// shared notes only. Signed-in (userId set): run inside a withUser tx so the
+// game_notes_select RLS policy also returns the caller's own private notes, and
+// flip isOwn. Never returns another user's private note either way.
+export async function getGameNotes(
+  universeId: number,
+  userId?: string,
+): Promise<GameNote[]> {
+  const query = (runner: typeof db | Tx) =>
+    runner
+      .select({
+        id: gameNotes.id,
+        universeId: gameNotes.universeId,
+        authorId: gameNotes.authorId,
+        authorName: users.name,
+        body: gameNotes.body,
+        visibility: gameNotes.visibility,
+        createdAt: gameNotes.createdAt,
+        updatedAt: gameNotes.updatedAt,
+      })
+      .from(gameNotes)
+      .leftJoin(users, eq(users.id, gameNotes.authorId))
+      .where(eq(gameNotes.universeId, universeId))
+      .orderBy(desc(gameNotes.createdAt));
+
+  const rows = userId
+    ? await withUser(userId, (tx) => query(tx))
+    : await query(db);
   return rows.map((r) => ({
     id: r.id,
     universeId: r.universeId,
@@ -577,7 +587,7 @@ export async function getGameNotes(universeId: number): Promise<GameNote[]> {
     authorName: r.authorName,
     body: r.body,
     visibility: r.visibility,
-    isOwn: false,
+    isOwn: userId ? r.authorId === userId : false,
     createdAt: isoReq(r.createdAt),
     updatedAt: isoReq(r.updatedAt),
   }));

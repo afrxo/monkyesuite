@@ -8,9 +8,12 @@
 
 import type {
   DemandKind,
+  InviteStatus,
   LifecycleEventType,
   LifecycleStage,
+  MemberRole,
   NoteVisibility,
+  ProjectStatus,
   TagAxis,
 } from "./enums.js";
 
@@ -211,4 +214,43 @@ export interface DiscoverItem {
 // Standard error envelope (docs/api-contract.md "Error envelope").
 export interface ApiError {
   error: { code: string; message: string; retryAfter?: number };
+}
+
+/* ----------------------------- scoped realm ------------------------------- */
+
+export interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  status: ProjectStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectDetail extends Project {
+  membership: { role: MemberRole };
+  counts: { members: number; openTasks: number };
+}
+
+export interface Membership {
+  id: string;
+  projectId: string;
+  userId: string;
+  role: MemberRole;
+  createdAt: string;
+  user: { id: string; name: string | null; email: string };
+}
+
+// Token is never serialized — it travels only in the invite email.
+export interface Invite {
+  id: string;
+  projectId: string;
+  email: string;
+  role: MemberRole;
+  status: InviteStatus;
+  invitedBy: string;
+  createdAt: string;
+  expiresAt: string | null;
 }

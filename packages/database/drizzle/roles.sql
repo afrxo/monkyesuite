@@ -70,7 +70,10 @@ grant select, insert, update, delete on
   notes,
   project_game,
   game_notes,
-  users
+  users,
+  sessions,
+  accounts,
+  verifications
 to monkye_app;
 
 -- Sequences (uuid/serial defaults): app role needs usage across the schema.
@@ -84,5 +87,13 @@ do $$ begin
   if exists (select from pg_proc where proname = 'is_project_member') then
     grant execute on function is_project_member(uuid) to monkye_app;
     grant execute on function is_project_owner(uuid) to monkye_app;
+  end if;
+  -- Item→project resolvers + privileged invite-accept (created in functions.sql).
+  if exists (select from pg_proc where proname = 'project_exists') then
+    grant execute on function project_exists(uuid) to monkye_app;
+    grant execute on function project_of_invite(uuid) to monkye_app;
+    grant execute on function accept_invite(text, text) to monkye_app;
+    grant execute on function create_project(text, text, text, text) to monkye_app;
+    grant execute on function remove_member(uuid, text) to monkye_app;
   end if;
 end $$;
