@@ -32,6 +32,7 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { z } from "zod";
+import { auth } from "./auth.js";
 import { TTL, TtlCache } from "./cache.js";
 import {
   gameExists,
@@ -56,6 +57,8 @@ import {
   toHttpError,
   validationError,
 } from "./errors.js";
+import { type AppEnv, resolveSession } from "./middleware.js";
+import { scopedRoutes } from "./scoped.js";
 
 // Parse a Zod schema, converting failures into the 422 validation envelope.
 function parse<S extends z.ZodTypeAny>(schema: S, input: unknown): z.infer<S> {
@@ -99,7 +102,11 @@ export function createApp() {
   const origins = (process.env.WEB_ORIGIN ?? "http://localhost:3000")
     .split(",")
     .map((s) => s.trim());
-  app.use("*", cors({ origin: origins }));
+  // credentials:true so the browser sends the Better Auth session cookie.
+  app.use("*", cors({ origin: origins, credentials: true }));
+
+  // Better Auth owns /v1/auth/* (sign-up, sign-in, session, sign-out).
+  app.on(["GET", "POST"], "/v1/auth/*", (c) => auth.handler(c.req.raw));
 
   app.onError((err, c) => {
     const http = toHttpError(err);
@@ -113,7 +120,10 @@ export function createApp() {
 
   app.get("/health", (c) => c.json({ ok: true }));
 
-  const v1 = new Hono();
+  const v1 = new Hono<AppEnv>();
+  // Resolve the session (if any) for every global route. Absence is fine here —
+  // these are auth-optional; only game-notes reads change when a user is present.
+  v1.use("*", resolveSession);
 
   /* ------------------------------- feed --------------------------------- */
   v1.get("/feed", async (c) => {
@@ -199,12 +209,20 @@ export function createApp() {
   });
 
   /* --------------------------- game notes ------------------------------- */
+  // Global/optional: signed-out returns shared notes only; signed-in adds the
+  // caller's own private notes (RLS via app.current_user_id) and flips isOwn.
+  // Only the anonymous result is cached — a per-user response must never be
+  // shared across callers.
   v1.get("/games/:universeId/notes", async (c) => {
     const id = parseUniverseId(c.req.param("universeId"));
     await assertGame(id);
+    const userId = c.get("userId");
+    if (userId) return c.json(await getGameNotes(id, userId));
     return c.json(await notesCache.get(String(id), () => getGameNotes(id)));
   });
 
   app.route("/v1", v1);
+  // Scoped realm (auth required) — projects, membership, invites.
+  app.route("/v1", scopedRoutes());
   return app;
 }

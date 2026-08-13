@@ -40,7 +40,132 @@ create or replace function is_project_owner(p uuid) returns boolean
     );
   $$;
 
+-- ---------------------------------------------------------------------------
+-- Item → project resolution (RLS-bypassing minimal reads).
+--
+-- These power the 404-vs-403 rule for scoped ITEM routes (docs/api-contract.md):
+-- resolve the target row's owning project (or its existence) BEFORE fetching the
+-- row, then run the membership check. Because they are SECURITY DEFINER they see
+-- the row regardless of the caller's membership, so the API can distinguish
+-- "exists but you're not a member" (403) from "no such id" (404) without a
+-- fetch-then-filter that RLS would collapse into an ambiguous empty result.
+-- They take no user context and never leak row CONTENT — only project identity.
+-- ---------------------------------------------------------------------------
+
+create or replace function project_exists(p uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+    select exists (select 1 from projects where id = p);
+  $$;
+
+create or replace function project_of_invite(p uuid) returns uuid
+  language sql stable security definer set search_path = public as $$
+    select project_id from invites where id = p;
+  $$;
+
+-- ---------------------------------------------------------------------------
+-- accept_invite — the one privileged mutation an unauthenticated-for-this-project
+-- user must perform: they are not yet a member, so RLS on invites/memberships
+-- would hide everything. SECURITY DEFINER runs the whole accept atomically and
+-- returns a status code the API maps to HTTP:
+--   ok             -> 200 (+ membership id)
+--   expired        -> 410 (invite marked expired; no membership created)
+--   already_member -> 409
+--   cap            -> 409 (two-collaborator cap reached)
+--   not_found      -> 404 (no pending invite for this token)
+-- Collaborator cap = at most two role='member' memberships per project.
+-- ---------------------------------------------------------------------------
+create or replace function accept_invite(p_token text, p_user_id text)
+  returns table (code text, membership_id uuid)
+  language plpgsql security definer set search_path = public as $$
+  declare
+    inv invites%rowtype;
+    member_count int;
+    new_id uuid;
+  begin
+    select * into inv from invites where token = p_token for update;
+
+    if not found or inv.status <> 'pending' then
+      return query select 'not_found'::text, null::uuid;
+      return;
+    end if;
+
+    if inv.expires_at is not null and inv.expires_at < now() then
+      update invites set status = 'expired' where id = inv.id;
+      return query select 'expired'::text, null::uuid;
+      return;
+    end if;
+
+    -- already a member of this project?
+    select id into new_id from memberships
+      where project_id = inv.project_id and user_id = p_user_id;
+    if found then
+      return query select 'already_member'::text, new_id;
+      return;
+    end if;
+
+    -- collaborator cap: at most two role='member' memberships.
+    select count(*) into member_count from memberships
+      where project_id = inv.project_id and role = 'member';
+    if inv.role = 'member' and member_count >= 2 then
+      return query select 'cap'::text, null::uuid;
+      return;
+    end if;
+
+    insert into memberships (project_id, user_id, role)
+      values (inv.project_id, p_user_id, inv.role)
+      returning id into new_id;
+    update invites set status = 'accepted' where id = inv.id;
+
+    return query select 'ok'::text, new_id;
+  end;
+  $$;
+
+-- ---------------------------------------------------------------------------
+-- Membership mutations. `memberships` intentionally has NO insert/delete RLS
+-- policy (schema.ts): the very first owner row can't satisfy an ownerOf check
+-- (no membership exists yet — chicken/egg), so membership writes go through
+-- these SECURITY DEFINER functions instead of the app role's RLS path. The API
+-- is the primary gate (requireOwner) before it ever calls remove_member.
+-- ---------------------------------------------------------------------------
+
+-- Create a project and its creator's owner membership atomically. Returns the
+-- new project id. A duplicate slug raises unique_violation (23505) → API 409.
+create or replace function create_project(
+    p_name text, p_slug text, p_description text, p_user_id text
+  ) returns uuid
+  language plpgsql security definer set search_path = public as $$
+  declare
+    new_id uuid;
+  begin
+    insert into projects (name, slug, description, created_by)
+      values (p_name, p_slug, p_description, p_user_id)
+      returning id into new_id;
+    insert into memberships (project_id, user_id, role)
+      values (new_id, p_user_id, 'owner');
+    return new_id;
+  end;
+  $$;
+
+-- Remove a collaborator (role='member' only — an owner is never removed here).
+-- Returns true if a row was deleted. Caller must already be the project owner
+-- (API requireOwner); this only performs the privileged delete.
+create or replace function remove_member(p_project uuid, p_user text)
+  returns boolean
+  language plpgsql security definer set search_path = public as $$
+  declare
+    deleted int;
+  begin
+    delete from memberships
+      where project_id = p_project and user_id = p_user and role = 'member';
+    get diagnostics deleted = row_count;
+    return deleted > 0;
+  end;
+  $$;
+
 -- Not world-executable. roles.sql grants EXECUTE to the app role only; the
 -- service role bypasses RLS and never needs these.
 revoke all on function is_project_member(uuid) from public;
 revoke all on function is_project_owner(uuid) from public;
+revoke all on function project_exists(uuid) from public;
+revoke all on function project_of_invite(uuid) from public;
+revoke all on function accept_invite(text, text) from public;
