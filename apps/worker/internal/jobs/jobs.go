@@ -29,9 +29,13 @@ func Default(d Deps) sched.Registry {
 			&discoverJob{d},
 			&snapshotJob{d, newSeenSet()},
 			&eventsJob{d},
+			// derive runs AFTER snapshot so it sees this tick's fresh metrics;
+			// it triggers SQL only (aggregation stays in Postgres, specs/02).
+			&deriveJob{d},
 		},
 		EveryDay: []sched.Job{
 			&enrichJob{d: d, client: enrichClient(d.Client)},
+			&trendDriftJob{d},
 		},
 	}
 }
