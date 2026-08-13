@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"monkyesuite/worker/internal/roblox"
+	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
 )
 
@@ -17,13 +18,17 @@ type discoverJob struct{ d Deps }
 
 func (j *discoverJob) Name() string { return "discover" }
 
-func (j *discoverJob) Run(ctx context.Context, tick uint64) (err error) {
+func (j *discoverJob) Run(ctx context.Context, tick uint64) (res sched.Result, err error) {
+	res = sched.Result{Metrics: discoverMetrics(0, 0, 0, 0)}
 	if j.d.Store == nil {
 		slog.Warn("discover skipped: no store")
-		return nil
+		res.Skipped = true
+		return res, nil
 	}
 	// Discover has the most volatile response shape — recover so a decode panic
-	// yields "no discovery this tick" instead of crashing the loop.
+	// yields "no discovery this tick" instead of crashing the loop. The run is
+	// still recorded (as ok, with whatever counters it reached): a panic that
+	// left no job_runs row would read as "discover never ran".
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("discover recovered from panic", "tick", tick, "panic", r)
@@ -38,7 +43,7 @@ func (j *discoverJob) Run(ctx context.Context, tick uint64) (err error) {
 	// Previous sorted set, read before we clear it, so we can diff exits.
 	prev, err := j.d.Store.GamesInSort(ctx)
 	if err != nil {
-		return err
+		return res, err
 	}
 
 	// Fan out the 9 sorts concurrently under the shared limiter.
@@ -53,11 +58,14 @@ func (j *discoverJob) Run(ctx context.Context, tick uint64) (err error) {
 	present := map[int64]struct{}{}
 	seedSeen := map[int64]struct{}{}
 
+	sortsOk, sortsFailed := 0, 0
 	for _, r := range results {
 		if r.Err != nil {
+			sortsFailed++
 			slog.Warn("discover sort failed", "sort", roblox.SortCategories[r.Index], "err", r.Err)
 			continue
 		}
+		sortsOk++
 		sortName := roblox.SortCategories[r.Index]
 		for i, e := range r.Value {
 			if e.IsSponsored {
@@ -84,20 +92,21 @@ func (j *discoverJob) Run(ctx context.Context, tick uint64) (err error) {
 		}
 	}
 
+	res.Metrics = discoverMetrics(sortsOk, sortsFailed, len(present), len(seeds))
 	if len(present) == 0 {
 		slog.Warn("discover: no games this tick (all sorts failed?)", "tick", tick)
-		return nil
+		return res, nil
 	}
 
 	// Must upsert games before FK-bearing writes (sort_snapshots, lifecycle).
 	if err := j.d.Store.UpsertGames(ctx, seeds); err != nil {
-		return err
+		return res, err
 	}
 	if err := j.d.Store.ApplyBestSorts(ctx, best); err != nil {
-		return err
+		return res, err
 	}
 	if err := j.d.Store.InsertSortSnapshots(ctx, snaps); err != nil {
-		return err
+		return res, err
 	}
 	if pruned, err := j.d.Store.PruneSortSnapshots(ctx, now.Add(-24*time.Hour)); err != nil {
 		slog.Warn("discover: prune failed", "err", err)
@@ -106,9 +115,22 @@ func (j *discoverJob) Run(ctx context.Context, tick uint64) (err error) {
 	}
 
 	j.prewarmIcons(ctx, seeds)
-	j.emitLifecycle(ctx, prev, present, now)
+	evs := j.emitLifecycle(ctx, prev, present, now)
 	slog.Info("discover done", "tick", tick, "games", len(present), "new_seeds", len(seeds), "snapshots", len(snaps))
-	return nil
+	res.RowsWritten = len(seeds) + len(snaps) + evs
+	return res, nil
+}
+
+// discoverMetrics is the §9.6 contract for this job. sortsFailed is the one that
+// matters on its own: discover is isolated so its failure can't fail snapshot
+// (§1.5), which means a silently-degrading sort scrape leaves no other trace.
+func discoverMetrics(sortsOk, sortsFailed, gamesSeen, newGames int) map[string]any {
+	return map[string]any{
+		"sortsOk":     sortsOk,
+		"sortsFailed": sortsFailed,
+		"gamesSeen":   gamesSeen,
+		"newGames":    newGames,
+	}
 }
 
 // prewarmIcons resolves 150×150 icons for newly-discovered games (batched 50)
@@ -136,8 +158,8 @@ func (j *discoverJob) prewarmIcons(ctx context.Context, seeds []store.GameSeed) 
 
 // emitLifecycle diffs the present set against the previous tick's sorted set:
 // entries emit sort_appearance (debounced 24h via games.last_sort_seen), exits
-// emit sort_exit.
-func (j *discoverJob) emitLifecycle(ctx context.Context, prev, present map[int64]struct{}, now time.Time) {
+// emit sort_exit. Returns the number of events written.
+func (j *discoverJob) emitLifecycle(ctx context.Context, prev, present map[int64]struct{}, now time.Time) int {
 	var entered []int64
 	for id := range present {
 		if _, was := prev[id]; !was {
@@ -172,9 +194,10 @@ func (j *discoverJob) emitLifecycle(ctx context.Context, prev, present map[int64
 	}
 	if err := j.d.Store.InsertLifecycleEvents(ctx, evs); err != nil {
 		slog.Warn("discover: lifecycle insert failed", "err", err)
-		return
+		return 0
 	}
 	if err := j.d.Store.TouchSortSeen(ctx, touched); err != nil {
 		slog.Warn("discover: touch last_sort_seen failed", "err", err)
 	}
+	return len(evs)
 }

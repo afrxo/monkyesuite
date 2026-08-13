@@ -32,6 +32,7 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { z } from "zod";
+import { adminRoutes } from "./admin/index.js";
 import { auth } from "./auth.js";
 import { TTL, TtlCache } from "./cache.js";
 import {
@@ -103,7 +104,10 @@ export function createApp() {
     .split(",")
     .map((s) => s.trim());
   // credentials:true so the browser sends the Better Auth session cookie.
-  app.use("*", cors({ origin: origins, credentials: true }));
+  // Scoped to /v1 deliberately: /admin is same-origin only and carries NO CORS
+  // allowance at all (specs/09 §9.0) — apps/web never calls it, and no browser
+  // origin may (the operator opens it directly on the API host).
+  app.use("/v1/*", cors({ origin: origins, credentials: true }));
 
   // Better Auth owns /v1/auth/* (sign-up, sign-in, session, sign-out).
   app.on(["GET", "POST"], "/v1/auth/*", (c) => auth.handler(c.req.raw));
@@ -224,5 +228,9 @@ export function createApp() {
   app.route("/v1", v1);
   // Scoped realm (auth required) — projects, membership, invites.
   app.route("/v1", scopedRoutes());
+  // Operator surface (specs/09). Outside /v1 and outside the JSON contract:
+  // server-rendered HTML behind the admin-only gate, with its own error
+  // handling so nothing here ever answers in the /v1 envelope.
+  app.route("/admin", adminRoutes());
   return app;
 }

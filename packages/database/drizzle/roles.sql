@@ -56,6 +56,21 @@ grant select, insert, update, delete on
 to monkye_app, monkye_service;
 
 -- ---------------------------------------------------------------------------
+-- OPERATIONS realm — worker telemetry + the admin control plane (specs/09 §9.6).
+-- GLOBAL tables, so both roles: the worker WRITES job_runs and marks job_commands
+-- as it drains them; the API READS both and inserts commands from /admin.
+-- ---------------------------------------------------------------------------
+grant select, insert, update, delete on
+  job_runs,
+  job_commands
+to monkye_app, monkye_service;
+
+-- audit_log is APPEND-ONLY, and that is a GRANT, not a convention: no update,
+-- no delete, to anyone. App role only — the worker has no actor to attribute a
+-- row to and never writes one.
+grant select, insert on audit_log to monkye_app;
+
+-- ---------------------------------------------------------------------------
 -- PROJECT-SCOPED realm + user-authored content + identity.
 -- Granted to the APP role ONLY. RLS is the backstop; the service role has no
 -- grant here at all (defence in depth on top of its BYPASSRLS attribute).
@@ -96,4 +111,33 @@ do $$ begin
     grant execute on function create_project(text, text, text, text) to monkye_app;
     grant execute on function remove_member(uuid, text) to monkye_app;
   end if;
+  -- Admin-panel invite creation (specs/09 §9.3a). Privileged insert with the
+  -- collaborator cap enforced inside the function, so /admin never needs the
+  -- invites policy weakened.
+  if exists (select from pg_proc where proname = 'admin_create_invite') then
+    grant execute on function
+      admin_create_invite(uuid, text, text, text, text, timestamptz) to monkye_app;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- pg_monitor for the app role — the admin derive-health panel (specs/09 §9.4.4)
+-- reads live Postgres load from pg_stat_activity. Derive runs as monkye_service
+-- while the API connects as monkye_app, and without pg_monitor a non-superuser
+-- sees other roles' backends with state/query/wait columns NULL'd — i.e. the
+-- panel would read empty and look like "no load" rather than "not permitted".
+--
+-- Scope note: pg_monitor also confers pg_read_all_settings. That is acceptable
+-- here because the panel renders COUNTS AND AGES ONLY — never query text, never
+-- a setting value (§9.3b's hard rule). Granting the role is what keeps the
+-- panel honest; the panel is what keeps the grant harmless.
+--
+-- Granting a predefined role requires superuser (same as BYPASSRLS above), so
+-- it is guarded: on an instance provisioned by a non-superuser this warns and
+-- the panel degrades to job_runs.duration_ms with an explicit "live read
+-- unavailable" banner rather than a silently empty panel.
+do $$ begin
+  grant pg_monitor to monkye_app;
+exception when insufficient_privilege then
+  raise warning 'could not grant pg_monitor to monkye_app (needs superuser); admin derive-health panel will degrade to job_runs only';
 end $$;

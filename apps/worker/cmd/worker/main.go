@@ -73,6 +73,15 @@ func main() {
 	}
 	loop := sched.NewWithInterval(reg, interval)
 
+	// Telemetry + the admin control plane (specs/09 §9.6). Both live in Postgres
+	// because the worker exposes no HTTP: job_runs is how the admin panel sees
+	// what ran, job_commands is the only way a manual trigger reaches the loop.
+	// Attached only with a store — a nil *store.Store in an interface is a
+	// non-nil interface holding nil, which would panic on first use.
+	if st != nil {
+		loop.WithRecorder(st).WithCommander(st)
+	}
+
 	// WORKER_DAY_TICKS / WORKER_HOUR_TICKS override the tier moduli for local/demo
 	// runs (e.g. fire the daily enrich tier on a warmed-up system, not only tick 0).
 	loop.WithTierTicks(envUint("WORKER_HOUR_TICKS"), envUint("WORKER_DAY_TICKS"))

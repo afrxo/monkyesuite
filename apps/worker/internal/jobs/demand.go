@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
 	"monkyesuite/worker/internal/youtube"
 )
@@ -29,25 +30,27 @@ type demandJob struct {
 
 func (j *demandJob) Name() string { return "demand" }
 
-func (j *demandJob) Run(ctx context.Context, tick uint64) error {
+func (j *demandJob) Run(ctx context.Context, tick uint64) (sched.Result, error) {
 	if j.d.Store == nil {
 		slog.Warn("demand skipped: no store")
-		return nil
+		return sched.Result{Skipped: true, Metrics: demandMetrics(0, 0)}, nil
 	}
+	// Skipped, not ok: an unconfigured YouTube key is exactly what the admin
+	// credentials panel reads off this job's last run (§9.3b).
 	if j.d.Youtube == nil {
 		slog.Warn("demand skipped: no YouTube client (YOUTUBE_API_KEY unset)")
-		return nil
+		return sched.Result{Skipped: true, Metrics: demandMetrics(0, 0)}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	terms, err := j.d.Store.ActiveDemandTerms(ctx)
 	if err != nil {
-		return err
+		return sched.Result{Metrics: demandMetrics(0, 0)}, err
 	}
 	if len(terms) == 0 {
 		slog.Info("demand: no active terms", "tick", tick)
-		return nil
+		return sched.Result{Metrics: demandMetrics(0, 0)}, nil
 	}
 
 	// captured_at is the UTC day so the write is idempotent per day (§4.2).
@@ -110,5 +113,14 @@ func (j *demandJob) Run(ctx context.Context, tick uint64) error {
 
 	slog.Info("demand done", "tick", tick, "terms", len(terms),
 		"snapshotted", snapshotted, "deferred", deferred, "yt_units_spent", spent, "yt_quota", quota)
-	return nil
+	m := demandMetrics(len(terms), spent)
+	m["snapshotted"] = snapshotted
+	m["deferred"] = deferred
+	return sched.Result{RowsWritten: snapshotted, Metrics: m}, nil
+}
+
+// demandMetrics is the §9.6 contract for this job. ytQuotaUsed is the binding
+// constraint (10k units/day), so it is the number that explains a short run.
+func demandMetrics(terms, ytQuotaUsed int) map[string]any {
+	return map[string]any{"terms": terms, "ytQuotaUsed": ytQuotaUsed}
 }

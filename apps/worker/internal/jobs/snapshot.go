@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"monkyesuite/worker/internal/roblox"
+	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
 )
 
@@ -44,10 +45,10 @@ type snapshotJob struct {
 
 func (j *snapshotJob) Name() string { return "snapshot" }
 
-func (j *snapshotJob) Run(ctx context.Context, tick uint64) error {
+func (j *snapshotJob) Run(ctx context.Context, tick uint64) (sched.Result, error) {
 	if j.d.Store == nil {
 		slog.Warn("snapshot skipped: no store")
-		return nil
+		return sched.Result{Skipped: true, Metrics: snapshotMetrics(0, 0, 0)}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
@@ -55,11 +56,11 @@ func (j *snapshotJob) Run(ctx context.Context, tick uint64) error {
 
 	tracked, err := j.d.Store.TrackedUniverseIDs(ctx)
 	if err != nil {
-		return err
+		return sched.Result{Metrics: snapshotMetrics(0, 0, 0)}, err
 	}
 	if len(tracked) == 0 {
 		slog.Info("snapshot: no tracked games", "tick", tick)
-		return nil
+		return sched.Result{Metrics: snapshotMetrics(0, 0, 0)}, nil
 	}
 
 	batches := chunk(tracked, roblox.GamesBatchLimit)
@@ -126,7 +127,7 @@ func (j *snapshotJob) Run(ctx context.Context, tick uint64) error {
 		slog.Warn("snapshot: insert creators failed", "err", err)
 	}
 	if err := j.d.Store.InsertMetrics(ctx, metrics); err != nil {
-		return err
+		return sched.Result{Metrics: snapshotMetrics(len(tracked), 0, 0)}, err
 	}
 	if err := j.d.Store.UpdateGameMeta(ctx, metas); err != nil {
 		slog.Warn("snapshot: update game meta failed", "err", err)
@@ -135,7 +136,19 @@ func (j *snapshotJob) Run(ctx context.Context, tick uint64) error {
 	carried := j.carryForward(ctx, tracked, seenThisTick, now)
 	slog.Info("snapshot done", "tick", tick, "tracked", len(tracked),
 		"fetched", len(seenThisTick), "landed", len(metrics), "carried_forward", carried, "new_creators", len(creators))
-	return nil
+	return sched.Result{
+		RowsWritten: len(metrics) + carried,
+		Metrics:     snapshotMetrics(len(tracked), len(metrics), carried),
+	}, nil
+}
+
+// snapshotMetrics is the §9.6 contract for this job, and the input to the admin
+// panel's primary data-quality signal (§9.4.1): carried/tracked is the
+// carry-forward rate. Carry-forward is a correctness mechanism — velocity reads
+// 0 instead of a fake spike — but a RISING rate means the snapshot is silently
+// degrading while metrics still land, which nothing else in the system surfaces.
+func snapshotMetrics(tracked, real, carried int) map[string]any {
+	return map[string]any{"tracked": tracked, "real": real, "carried": carried}
 }
 
 // carryForward re-inserts the last known metric (stamped at `now`) for every

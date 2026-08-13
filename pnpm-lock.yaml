@@ -41,6 +41,9 @@ importers:
       hono:
         specifier: 4.13.1
         version: 4.13.1
+      htmx.org:
+        specifier: ^2.0.10
+        version: 2.0.10
       zod:
         specifier: 3.25.76
         version: 3.25.76
@@ -1563,6 +1566,9 @@ packages:
   hono@4.13.1:
     resolution: {integrity: sha512-kdJoFVv2xmayw6cY09H7AbMJMt8Jn5jdlEdXsP7AGBdF2DIptVlKlOLKXP41yPip4/a3yQPv9gVcJYI8YY04dw==}
     engines: {node: '>=16.9.0'}
+
+  htmx.org@2.0.10:
+    resolution: {integrity: sha512-kdeJe7ZVwaS6QMz/ebBIVtZdpwen6L0OQ5GOhPV9MKBb196TCZeZu4yA7ZIQsaLKv7EpXz+So7KSXNuHXhj7Cw==}
 
   isbot@5.2.1:
     resolution: {integrity: sha512-dJ+LpKyClQZ7NG+j3OensC/mAZkGpukE9YUrgPYvAZj2doVL0edfDgywTUh5CXa0o+nW9a1V9e5+CJTX8+SxRw==}
@@ -3231,6 +3237,8 @@ snapshots:
       srvx: 0.11.22
 
   hono@4.13.1: {}
+
+  htmx.org@2.0.10: {}
 
   isbot@5.2.1: {}
 

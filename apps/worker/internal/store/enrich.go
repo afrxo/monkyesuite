@@ -43,7 +43,7 @@ func (s *Store) EnqueueEnrich(ctx context.Context, kind string, targetIDs []int6
 func (s *Store) ClaimEnrichJob(ctx context.Context) (*EnrichJob, error) {
 	var j EnrichJob
 	err := s.pool.QueryRow(ctx,
-		`update enrich_jobs set status = 'running', attempts = attempts + 1
+		`update enrich_jobs set status = 'running', attempts = attempts + 1, updated_at = now()
 		 where id = (
 		   select id from enrich_jobs
 		   where status = 'pending' and run_after <= now()
@@ -60,22 +60,35 @@ func (s *Store) ClaimEnrichJob(ctx context.Context) (*EnrichJob, error) {
 	return &j, nil
 }
 
-// CompleteEnrich marks a claimed job done.
+// CompleteEnrich marks a claimed job done, clearing any error from an earlier
+// attempt so a succeeded row never shows a stale failure.
 func (s *Store) CompleteEnrich(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `update enrich_jobs set status = 'done' where id = $1`, id)
+	_, err := s.pool.Exec(ctx,
+		`update enrich_jobs set status = 'done', last_error = null, updated_at = now() where id = $1`, id)
 	return err
 }
 
 // FailEnrich requeues a failed job with backoff, or dead-letters it as `failed`
-// once attempts reach the retry budget (specs/01 §1.4).
-func (s *Store) FailEnrich(ctx context.Context, id string, attempts, budget int, backoff time.Duration) error {
+// once attempts reach the retry budget (specs/01 §1.4). The cause is recorded on
+// the row: `attempts` alone says a job gave up but not what it hit, which makes
+// a dead-letter unactionable in the admin queue panel (specs/09 §9.4.2).
+func (s *Store) FailEnrich(ctx context.Context, id string, attempts, budget int, backoff time.Duration, cause error) error {
+	var causeText *string
+	if cause != nil {
+		msg := cause.Error()
+		causeText = &msg
+	}
 	if attempts >= budget {
-		_, err := s.pool.Exec(ctx, `update enrich_jobs set status = 'failed' where id = $1`, id)
+		_, err := s.pool.Exec(ctx,
+			`update enrich_jobs set status = 'failed', last_error = $2, updated_at = now() where id = $1`,
+			id, causeText)
 		return err
 	}
 	_, err := s.pool.Exec(ctx,
-		`update enrich_jobs set status = 'pending', run_after = now() + $2::interval where id = $1`,
-		id, backoff.String())
+		`update enrich_jobs set status = 'pending', run_after = now() + $2::interval,
+		   last_error = $3, updated_at = now()
+		 where id = $1`,
+		id, backoff.String(), causeText)
 	return err
 }
 

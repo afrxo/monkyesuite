@@ -401,6 +401,15 @@ export const enrichJobs = pgTable(
     runAfter: timestamp("run_after", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Why a row dead-lettered. `attempts` alone says a job gave up but not what
+    // it hit, which makes a `failed` row unactionable in the admin queue panel
+    // (specs/09 §9.4.2). Cleared on requeue.
+    lastError: text("last_error"),
+    // Touched on every status change, so the age of a `running` claim is
+    // derivable — a claim older than a tick is a crash, not work in progress.
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     // claim query: pending rows whose run_after is due, oldest first.
@@ -561,6 +570,13 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  // The GLOBAL admin role (specs/09 §9.1) — distinct from project owner/member,
+  // which are per-project and confer nothing here. A flag rather than a
+  // global_roles table: there is exactly one global role, the gate reads it on
+  // every /admin request, and `users` carries no RLS so it resolves without a
+  // policy. Set out of band by SQL only; no code path writes it (that would let
+  // the panel escalate its own privilege).
+  isAdmin: boolean("is_admin").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -635,6 +651,112 @@ export const verifications = pgTable(
       .defaultNow(),
   },
   (t) => [index("verifications_identifier_idx").on(t.identifier)],
+);
+
+/* ========================================================================== */
+/*  OPERATIONS REALM — worker telemetry + the admin control plane.             */
+/*  GLOBAL (no RLS, no project_id). Declared after the identity block only     */
+/*  because two of the three carry a users FK. specs/09-admin.md §9.6.         */
+/*                                                                             */
+/*  The worker exposes no HTTP: it is a tick loop, not a service. So every      */
+/*  health number the admin panel reads is a row left behind here (job_runs),   */
+/*  and every action it takes is a row the worker picks up (job_commands).      */
+/*  Postgres is the whole control plane.                                        */
+/* ========================================================================== */
+
+/**
+ * job_runs — one row per job execution, written by the scheduler (not by each
+ * job), so a new job is instrumented by existing rather than by remembering.
+ * Replaces slog as the queryable record: log lines can't be read from the API
+ * and don't survive a restart.
+ *
+ * `metrics` carries the per-job counter contract in §9.6 (snapshot's
+ * tracked/real/carried, discover's sortsOk/…, etc.) plus the Roblox call
+ * counters every job records: callsIssued, callsSkipped, and an `endpoints`
+ * map of {ok,fail,skipped} per endpoint group.
+ */
+export const jobRuns = pgTable(
+  "job_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    job: text("job").notNull(), // discover|snapshot|events|enrich|enrich-drain|derive|trend-drift|demand
+    tick: bigint("tick", { mode: "number" }).notNull(),
+    // Which limiter pool the job drew from (specs/01 §1.0). This is what lets
+    // the admin limiter panel verify the two-tier reservation holds under load:
+    // enrich-tier skips are the design working, critical-tier skips are a bug.
+    tier: text("tier").notNull(), // critical|enrich
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    status: text("status").notNull(), // ok|error|skipped
+    rowsWritten: integer("rows_written").notNull().default(0),
+    error: text("error"),
+    metrics: jsonb("metrics").notNull().default({}),
+  },
+  (t) => [
+    index("job_runs_job_started_idx").on(t.job, t.startedAt.desc()),
+    index("job_runs_started_idx").on(t.startedAt.desc()),
+  ],
+);
+
+/**
+ * job_commands — the admin panel → worker channel (specs/09 §9.5).
+ * The panel cannot run a job: the worker owns the tick loop. It inserts a
+ * command row and the worker claims it at the top of its next tick with
+ * `FOR UPDATE SKIP LOCKED` — the same pattern as enrich_jobs. Keep `kind` a
+ * closed, small vocabulary; this is the only path into the worker.
+ */
+export const jobCommands = pgTable(
+  "job_commands",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(), // run_job
+    job: text("job").notNull(),
+    status: text("status").notNull().default("pending"), // pending|claimed|done|failed
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => users.id),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    error: text("error"),
+  },
+  (t) => [index("job_commands_claim_idx").on(t.status, t.requestedAt)],
+);
+
+/**
+ * audit_log — who did what, when, on the highest-privilege surface.
+ * Written in the SAME transaction as the effect it records: an action that
+ * succeeds without an audit row, or a row for an effect that rolled back, both
+ * defeat the point. Also written for every 403 at the admin gate — attempted
+ * access is the entry worth having.
+ *
+ * APPEND-ONLY, enforced by grant (select+insert only in roles.sql), not by
+ * convention. `detail` holds named, whitelisted fields — NEVER a raw request
+ * body, and never a secret value, password or invite token (§9.3b).
+ */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => users.id),
+    action: text("action").notNull(), // job.trigger|enrich.requeue|…|admin.denied
+    target: text("target"), // affected id: universeId, job name, email, …
+    detail: jsonb("detail").notNull().default({}),
+    outcome: text("outcome").notNull(), // ok|error|denied
+    ip: text("ip"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("audit_log_created_idx").on(t.createdAt.desc()),
+    index("audit_log_actor_idx").on(t.actorId, t.createdAt.desc()),
+  ],
 );
 
 /* ========================================================================== */
