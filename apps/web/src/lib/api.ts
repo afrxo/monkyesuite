@@ -3,7 +3,17 @@
 // contract package so producer and consumer agree.
 
 import type {
+  Board,
+  CreateDocInput,
+  CreateGameNoteInput,
+  CreateMilestoneInput,
+  CreateNoteInput,
+  CreateProjectGameInput,
+  CreateProjectInput,
+  CreateSubtaskInput,
+  CreateTaskInput,
   DemandOverlay,
+  Doc,
   FeedItem,
   FeedSort,
   GameDetail,
@@ -11,12 +21,28 @@ import type {
   GameMetric,
   GameNote,
   GameStat,
+  Invite,
   LifecycleEvent,
   LifecycleStage,
+  Membership,
+  Milestone,
   Monetization,
+  MoveTaskInput,
   Paged,
+  PatchDocInput,
+  PatchGameNoteInput,
+  PatchMilestoneInput,
+  PatchNoteInput,
+  PatchProjectInput,
+  PatchTaskInput,
+  Project,
+  ProjectDetail,
+  ProjectGame,
+  ProjectNote,
+  ReorderTaskInput,
   SortSnapshot,
   Tag,
+  Task,
 } from "@monkyesuite/shared";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8787/v1";
@@ -32,23 +58,38 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string): Promise<T> {
+type Method = "GET" | "POST" | "PATCH" | "DELETE";
+
+// One request path for global reads AND scoped calls. credentials:"include"
+// sends the Better Auth session cookie to the API origin so scoped routes see a
+// session; it's harmless on anonymous global reads.
+async function request<T>(
+  method: Method,
+  path: string,
+  body?: unknown,
+): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { accept: "application/json" },
+    method,
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     let code = "error";
     let message = res.statusText;
     try {
-      const body: unknown = await res.json();
+      const errBody: unknown = await res.json();
       if (
-        body &&
-        typeof body === "object" &&
-        "error" in body &&
-        body.error &&
-        typeof body.error === "object"
+        errBody &&
+        typeof errBody === "object" &&
+        "error" in errBody &&
+        errBody.error &&
+        typeof errBody.error === "object"
       ) {
-        const e = body.error as { code?: string; message?: string };
+        const e = errBody.error as { code?: string; message?: string };
         code = e.code ?? code;
         message = e.message ?? message;
       }
@@ -57,8 +98,16 @@ async function get<T>(path: string): Promise<T> {
     }
     throw new ApiError(res.status, code, message);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+const get = <T>(path: string): Promise<T> => request<T>("GET", path);
+const post = <T>(path: string, body?: unknown): Promise<T> =>
+  request<T>("POST", path, body ?? {});
+const patch = <T>(path: string, body: unknown): Promise<T> =>
+  request<T>("PATCH", path, body);
+const del = (path: string): Promise<void> => request<void>("DELETE", path);
 
 function qs(params: Record<string, string | number | undefined>): string {
   const s = new URLSearchParams();
@@ -95,4 +144,76 @@ export const api = {
   demand: (id: number) => get<DemandOverlay>(`/games/${id}/demand`),
   gameTags: (id: number) => get<Tag[]>(`/games/${id}/tags`),
   notes: (id: number) => get<GameNote[]>(`/games/${id}/notes`),
+
+  // Game-note authoring (auth required; author-gated at the API).
+  createNote: (id: number, input: CreateGameNoteInput) =>
+    post<GameNote>(`/games/${id}/notes`, input),
+  patchNote: (noteId: string, input: PatchGameNoteInput) =>
+    patch<GameNote>(`/notes/${noteId}`, input),
+  deleteNote: (noteId: string) => del(`/notes/${noteId}`),
+
+  /* ----------------------------- scoped realm --------------------------- */
+
+  projects: () => get<Project[]>("/projects"),
+  project: (id: string) => get<ProjectDetail>(`/projects/${id}`),
+  createProject: (input: CreateProjectInput) =>
+    post<ProjectDetail>("/projects", input),
+  patchProject: (id: string, input: PatchProjectInput) =>
+    patch<Project>(`/projects/${id}`, input),
+  deleteProject: (id: string) => del(`/projects/${id}`),
+
+  members: (id: string) => get<Membership[]>(`/projects/${id}/members`),
+  removeMember: (id: string, userId: string) =>
+    del(`/projects/${id}/members/${userId}`),
+  invites: (id: string) => get<Invite[]>(`/projects/${id}/invites`),
+  createInvite: (id: string, email: string) =>
+    post<Invite>(`/projects/${id}/invites`, { email }),
+  revokeInvite: (inviteId: string) => del(`/invites/${inviteId}`),
+  acceptInvite: (token: string) =>
+    post<Membership>(`/invites/${token}/accept`, {}),
+
+  // Board.
+  board: (id: string) => get<Board>(`/projects/${id}/board`),
+  createTask: (id: string, input: CreateTaskInput) =>
+    post<Task>(`/projects/${id}/tasks`, input),
+  patchTask: (taskId: string, input: PatchTaskInput) =>
+    patch<Task>(`/tasks/${taskId}`, input),
+  moveTask: (taskId: string, input: MoveTaskInput) =>
+    patch<Task>(`/tasks/${taskId}/move`, input),
+  reorderTask: (taskId: string, input: ReorderTaskInput) =>
+    patch<Task>(`/tasks/${taskId}/reorder`, input),
+  createSubtask: (taskId: string, input: CreateSubtaskInput) =>
+    post<Task>(`/tasks/${taskId}/subtasks`, input),
+  deleteTask: (taskId: string) => del(`/tasks/${taskId}`),
+
+  // Milestones.
+  createMilestone: (id: string, input: CreateMilestoneInput) =>
+    post<Milestone>(`/projects/${id}/milestones`, input),
+  patchMilestone: (milestoneId: string, input: PatchMilestoneInput) =>
+    patch<Milestone>(`/milestones/${milestoneId}`, input),
+  deleteMilestone: (milestoneId: string) => del(`/milestones/${milestoneId}`),
+
+  // Docs.
+  docs: (id: string) => get<Doc[]>(`/projects/${id}/docs`),
+  doc: (docId: string) => get<Doc>(`/docs/${docId}`),
+  createDoc: (id: string, input: CreateDocInput) =>
+    post<Doc>(`/projects/${id}/docs`, input),
+  patchDoc: (docId: string, input: PatchDocInput) =>
+    patch<Doc>(`/docs/${docId}`, input),
+  deleteDoc: (docId: string) => del(`/docs/${docId}`),
+
+  // Project notes.
+  projectNotes: (id: string) => get<ProjectNote[]>(`/projects/${id}/notes`),
+  createProjectNote: (id: string, input: CreateNoteInput) =>
+    post<ProjectNote>(`/projects/${id}/notes`, input),
+  patchProjectNote: (noteId: string, input: PatchNoteInput) =>
+    patch<ProjectNote>(`/project-notes/${noteId}`, input),
+  deleteProjectNote: (noteId: string) => del(`/project-notes/${noteId}`),
+
+  // Pinned tracker games.
+  projectGames: (id: string) => get<ProjectGame[]>(`/projects/${id}/games`),
+  linkGame: (id: string, input: CreateProjectGameInput) =>
+    post<ProjectGame>(`/projects/${id}/games`, input),
+  unlinkGame: (id: string, universeId: number) =>
+    del(`/projects/${id}/games/${universeId}`),
 };

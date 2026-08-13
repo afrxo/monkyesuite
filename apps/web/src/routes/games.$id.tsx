@@ -1,6 +1,7 @@
 import type { GameMetric } from "@monkyesuite/shared";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { GameNotes } from "../components/GameNotes";
 import { Estimate, LifecycleBadge, SortRank, Stat } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { fmtCompact, fmtFull, fmtPct, fmtSigned, relTime } from "../lib/format";
@@ -324,35 +325,9 @@ function GameDetailPage() {
         </Section>
       ) : null}
 
-      {/* game notes — shared + (later) own private */}
+      {/* game notes — shared + own-private, with compose when signed in */}
       <Section title="Game notes">
-        {notes.length ? (
-          <ul className="flex flex-col gap-2">
-            {notes.map((n) => (
-              <li
-                key={n.id}
-                className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3 text-sm"
-              >
-                <div className="mb-1 flex items-center gap-2 text-xs text-neutral-500">
-                  <span className="text-neutral-300">
-                    {n.authorName ?? n.authorId}
-                  </span>
-                  <span className="rounded bg-neutral-800 px-1.5 py-px capitalize">
-                    {n.visibility}
-                  </span>
-                  <span>{relTime(n.createdAt)}</span>
-                </div>
-                <p className="text-neutral-300">{n.body}</p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <Empty>No notes yet.</Empty>
-        )}
-        <p className="mt-2 text-xs text-neutral-600">
-          Signed-out view shows shared notes only. Sign-in (private notes +
-          compose) lands with identity/access.
-        </p>
+        <GameNotes universeId={game.universeId} initial={notes} />
       </Section>
 
       {/* history depth footer */}

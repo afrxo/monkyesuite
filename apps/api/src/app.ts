@@ -34,6 +34,7 @@ import { cors } from "hono/cors";
 import type { z } from "zod";
 import { adminRoutes } from "./admin/index.js";
 import { auth } from "./auth.js";
+import { boardRoutes } from "./board.js";
 import { TTL, TtlCache } from "./cache.js";
 import {
   gameExists,
@@ -58,8 +59,10 @@ import {
   toHttpError,
   validationError,
 } from "./errors.js";
+import { gameNoteRoutes } from "./gamenotes.js";
 import { type AppEnv, resolveSession } from "./middleware.js";
 import { scopedRoutes } from "./scoped.js";
+import { workspaceRoutes } from "./workspace.js";
 
 // Parse a Zod schema, converting failures into the 422 validation envelope.
 function parse<S extends z.ZodTypeAny>(schema: S, input: unknown): z.infer<S> {
@@ -226,8 +229,19 @@ export function createApp() {
   });
 
   app.route("/v1", v1);
-  // Scoped realm (auth required) — projects, membership, invites.
-  app.route("/v1", scopedRoutes());
+  // Scoped realm (auth required). Each router resolves membership/authorship
+  // through the shared helper before touching data (07-api.md §7.1).
+  //   scopedRoutes    — projects, membership, invites
+  //   boardRoutes     — board, tasks, milestones
+  //   workspaceRoutes — docs, notes, pinned games
+  //   gameNoteRoutes  — game-note authoring (global-realm, author-gated)
+  const scoped = new Hono<AppEnv>();
+  scoped.use("*", resolveSession);
+  scoped.route("/", scopedRoutes());
+  scoped.route("/", boardRoutes());
+  scoped.route("/", workspaceRoutes());
+  scoped.route("/", gameNoteRoutes());
+  app.route("/v1", scoped);
   // Operator surface (specs/09). Outside /v1 and outside the JSON contract:
   // server-rendered HTML behind the admin-only gate, with its own error
   // handling so nothing here ever answers in the /v1 envelope.

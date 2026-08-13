@@ -82,3 +82,39 @@ export async function projectOfInvite(
   );
   return r.rows[0]?.pid ?? null;
 }
+
+// Flat scoped item routes (/tasks/:id, /milestones/:id, /docs/:id,
+// /project-notes/:id) resolve their owning project the same RLS-bypassing way,
+// so the API can 403-vs-404 before it fetches. `kind` picks the resolver fn.
+type ScopedItem = "task" | "milestone" | "doc" | "note";
+const RESOLVER: Record<ScopedItem, string> = {
+  task: "project_of_task",
+  milestone: "project_of_milestone",
+  doc: "project_of_doc",
+  note: "project_of_note",
+};
+
+export async function projectOfItem(
+  kind: ScopedItem,
+  id: string,
+): Promise<string | null> {
+  const r = await db.execute<{ pid: string | null }>(
+    sql`select ${sql.raw(RESOLVER[kind])}(${id}) as pid`,
+  );
+  return r.rows[0]?.pid ?? null;
+}
+
+// Resolve an item's project + membership in one step, throwing 404/403 exactly
+// like resolveProjectAccess. Returns the resolved projectId + the caller role.
+export async function resolveItemAccess(
+  tx: Tx,
+  kind: ScopedItem,
+  id: string,
+  userId: string,
+  opts: { requireOwner?: boolean } = {},
+): Promise<{ projectId: string; role: MemberRole }> {
+  const projectId = await projectOfItem(kind, id);
+  if (!projectId) throw notFound("No such item.");
+  const access = await resolveProjectAccess(tx, projectId, userId, opts);
+  return { projectId, role: access.role };
+}
