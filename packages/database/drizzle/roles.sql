@@ -92,6 +92,10 @@ do $$ begin
   if exists (select from pg_proc where proname = 'project_exists') then
     grant execute on function project_exists(uuid) to monkye_app;
     grant execute on function project_of_invite(uuid) to monkye_app;
+    grant execute on function project_of_task(uuid) to monkye_app;
+    grant execute on function project_of_milestone(uuid) to monkye_app;
+    grant execute on function project_of_doc(uuid) to monkye_app;
+    grant execute on function project_of_note(uuid) to monkye_app;
     grant execute on function accept_invite(text, text) to monkye_app;
     grant execute on function create_project(text, text, text, text) to monkye_app;
     grant execute on function remove_member(uuid, text) to monkye_app;

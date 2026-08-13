@@ -12,9 +12,12 @@ import type {
   LifecycleEventType,
   LifecycleStage,
   MemberRole,
+  MilestoneStatus,
   NoteVisibility,
   ProjectStatus,
   TagAxis,
+  TaskPriority,
+  TaskStatus,
 } from "./enums.js";
 
 // jsonb columns — unknown shape at the type layer.
@@ -253,4 +256,97 @@ export interface Invite {
   invitedBy: string;
   createdAt: string;
   expiresAt: string | null;
+}
+
+/* ------------------------------- board ------------------------------------ */
+
+export interface Milestone {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  status: MilestoneStatus;
+  orderKey: string;
+  targetDate: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+// A minimal reference to a linked tracker game, for rendering a card's chip.
+export interface TaskGameRef {
+  universeId: number;
+  name: string;
+  iconUrl: string | null;
+}
+
+export interface Task {
+  id: string;
+  projectId: string;
+  milestoneId: string | null;
+  parentTaskId: string | null;
+  title: string;
+  body: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  orderKey: string;
+  assigneeId: string | null;
+  assignee: { id: string; name: string | null; email: string } | null;
+  universeId: number | null;
+  game: TaskGameRef | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  dueAt: string | null;
+  // One level of subtasks only (specs/05 §5.1). Present on top-level cards.
+  subtasks: Task[];
+}
+
+// One board column: its status plus the ordered cards in it.
+export interface BoardLane {
+  status: TaskStatus;
+  tasks: Task[];
+}
+
+// The full board fetch (07-api.md §7.2): lanes in canonical order, plus the
+// project's milestones so the UI can group/filter without a second round-trip.
+export interface Board {
+  projectId: string;
+  lanes: BoardLane[];
+  milestones: Milestone[];
+}
+
+/* --------------------------- docs & project notes ------------------------- */
+
+export interface Doc {
+  id: string;
+  projectId: string;
+  title: string;
+  body: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectNote {
+  id: string;
+  projectId: string;
+  title: string | null;
+  body: string | null;
+  universeId: number | null;
+  game: TaskGameRef | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* --------------------------- pinned tracker games ------------------------- */
+
+export interface ProjectGame {
+  projectId: string;
+  universeId: number;
+  name: string;
+  iconUrl: string | null;
+  note: string | null;
+  addedBy: string | null;
+  addedAt: string;
 }

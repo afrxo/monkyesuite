@@ -60,6 +60,29 @@ export const PROJECT_STATUSES = [
 ] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
+// Board columns — canonical left-to-right order (mirrors task_status in schema).
+export const TASK_STATUSES = [
+  "backlog",
+  "todo",
+  "in_progress",
+  "review",
+  "done",
+  "archived",
+] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const TASK_PRIORITIES = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "urgent",
+] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+export const MILESTONE_STATUSES = ["planned", "active", "done"] as const;
+export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
+
 // Feed sort + discovery surfaces (API contract, not schema enums).
 export const FEED_SORTS = [
   "spike",

@@ -62,6 +62,30 @@ create or replace function project_of_invite(p uuid) returns uuid
     select project_id from invites where id = p;
   $$;
 
+-- Scoped board/workspace item → owning project. Same 404-vs-403 role as
+-- project_of_invite: resolve the target row's project WITHOUT leaking content,
+-- so the API can membership-check before it fetches (and RLS collapses a
+-- non-member's read to empty). One per scoped item table with a flat item route.
+create or replace function project_of_task(p uuid) returns uuid
+  language sql stable security definer set search_path = public as $$
+    select project_id from tasks where id = p;
+  $$;
+
+create or replace function project_of_milestone(p uuid) returns uuid
+  language sql stable security definer set search_path = public as $$
+    select project_id from milestones where id = p;
+  $$;
+
+create or replace function project_of_doc(p uuid) returns uuid
+  language sql stable security definer set search_path = public as $$
+    select project_id from docs where id = p;
+  $$;
+
+create or replace function project_of_note(p uuid) returns uuid
+  language sql stable security definer set search_path = public as $$
+    select project_id from notes where id = p;
+  $$;
+
 -- ---------------------------------------------------------------------------
 -- accept_invite — the one privileged mutation an unauthenticated-for-this-project
 -- user must perform: they are not yet a member, so RLS on invites/memberships
@@ -168,4 +192,8 @@ revoke all on function is_project_member(uuid) from public;
 revoke all on function is_project_owner(uuid) from public;
 revoke all on function project_exists(uuid) from public;
 revoke all on function project_of_invite(uuid) from public;
+revoke all on function project_of_task(uuid) from public;
+revoke all on function project_of_milestone(uuid) from public;
+revoke all on function project_of_doc(uuid) from public;
+revoke all on function project_of_note(uuid) from public;
 revoke all on function accept_invite(text, text) from public;
