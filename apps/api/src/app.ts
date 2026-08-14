@@ -17,6 +17,8 @@ import type {
   LifecycleEvent,
   Monetization,
   Paged,
+  PulsePayload,
+  PulseSearchResult,
   SortSnapshot,
   Tag,
 } from "@monkyesuite/shared";
@@ -24,6 +26,8 @@ import {
   discoverSurfaceSchema,
   feedQuerySchema,
   metricsQuerySchema,
+  PULSE_FILTERS,
+  PULSE_SORTS,
   tagsQuerySchema,
   timeseriesQuerySchema,
   universeIdSchema,
@@ -46,6 +50,8 @@ import {
   getLifecycleEvents,
   getMetrics,
   getMonetization,
+  getPulse,
+  getPulseSearch,
   getSorts,
   getStatsHistory,
   getTags,
@@ -92,6 +98,12 @@ const monetizationCache = new TtlCache<Monetization>(TTL.timeseries);
 const demandCache = new TtlCache<DemandOverlay>(TTL.timeseries);
 const gameTagsCache = new TtlCache<Tag[]>(TTL.tags);
 const tagsCache = new TtlCache<Tag[]>(TTL.tags);
+// Pulse: 30s in-process memo mirrors the s-maxage sent to CDN, so a Railway
+// instance still absorbs bursty request-path hits between edge revalidations.
+const pulseCache = new TtlCache<PulsePayload>(30_000);
+// Search: 15s memo keeps user typing latency low without loading the DB. Keyed
+// by lowercased query.
+const searchCache = new TtlCache<PulseSearchResult[]>(15_000);
 
 // Resolve a game or throw 404 — used before returning sub-resources so an
 // unknown universeId is a clean 404, not an empty list masquerading as data.
@@ -152,6 +164,44 @@ export function createApp() {
     const q = parse(feedQuerySchema, c.req.query());
     const key = JSON.stringify(q);
     return c.json(await feedCache.get(key, () => getFeed(q)));
+  });
+
+  /* ------------------------------- pulse -------------------------------- */
+  // Reads exclusively from the denormalized game_stats_latest + cohort_stats +
+  // feed_health tables (worker precomputes; specs/02). Two indexed reads per
+  // hit; expected server time <50ms even cold. Edge/CDN caches on
+  // Cache-Control: s-maxage=30, stale-while-revalidate=120 — the derive tick
+  // is the actual freshness resolution.
+  v1.get("/pulse", async (c) => {
+    const filterRaw = c.req.query("filter") ?? "all";
+    const sortRaw = c.req.query("sort") ?? "spike";
+    const filter = (PULSE_FILTERS as readonly string[]).includes(filterRaw)
+      ? (filterRaw as (typeof PULSE_FILTERS)[number])
+      : "all";
+    const sort = (PULSE_SORTS as readonly string[]).includes(sortRaw)
+      ? (sortRaw as (typeof PULSE_SORTS)[number])
+      : "spike";
+    const payload = await pulseCache.get(`${filter}:${sort}`, () =>
+      getPulse(filter, sort),
+    );
+    c.header(
+      "Cache-Control",
+      "public, s-maxage=30, stale-while-revalidate=120",
+    );
+    return c.json(payload);
+  });
+
+  /* ------------------------------ search -------------------------------- */
+  // Game/creator name substring lookup for the pulse Cmd-K modal. Auth-gated
+  // (specs/06 §6.6); returns [] for queries shorter than 2 chars.
+  v1.get("/search", async (c) => {
+    const q = (c.req.query("q") ?? "").trim();
+    if (q.length < 2) return c.json([] as PulseSearchResult[]);
+    const results = await searchCache.get(q.toLowerCase(), () =>
+      getPulseSearch(q),
+    );
+    c.header("Cache-Control", "public, s-maxage=15, stale-while-revalidate=60");
+    return c.json(results);
   });
 
   /* --------------------------- discovery -------------------------------- */

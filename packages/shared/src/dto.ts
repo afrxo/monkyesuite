@@ -7,6 +7,7 @@
 // layer can label it an estimate. See docs/api-contract.md "Freshness".
 
 import type {
+  CohortBasis,
   DemandKind,
   LifecycleEventType,
   LifecycleStage,
@@ -14,6 +15,7 @@ import type {
   MilestoneStatus,
   NoteVisibility,
   ProjectStatus,
+  PulseStage,
   TagAxis,
   TaskPriority,
   TaskStatus,
@@ -349,4 +351,82 @@ export interface ProjectGame {
   note: string | null;
   addedBy: string | null;
   addedAt: string;
+}
+
+/* --------------------------------- pulse ---------------------------------- */
+
+// One card on the pulse feed. Mirrors the shape the presentational stack in
+// apps/web consumes; every derived field is precomputed by the worker into
+// game_stats_latest, so a card is one row read.
+export interface PulseCardGame {
+  id: number; // universeId
+  name: string;
+  creatorName: string;
+  creatorVerified: boolean;
+  genre: string | null;
+  thumbnail: string | null;
+  ccu: number;
+  ccu24hAgo: number | null;
+  velocity: number;
+  spike: number | null; // multiplicative ratio (current / baseline_avg)
+  trendScore: number | null;
+  lifecycle: PulseStage | null;
+  reason: string; // annotation kicker; "" when nothing notable
+  spark: number[]; // last-24h hourly CCU points; [] when insufficient data
+  currentSort: string | null;
+  currentSortRank: number | null;
+  createdAtMs: number | null; // Roblox-side createdAt (js ms)
+  trackingDays: number; // days since firstSeenAt on our side
+  velocityPctInCohort: number | null;
+  cohortBasis: CohortBasis | null;
+  cohortSize: number;
+  velocityChange24hPct: number | null;
+  delta24hPct: number | null;
+}
+
+export interface PulseHero {
+  trackedCcu: number;
+  movers: number;
+  new48h: number;
+}
+
+export interface PulseDistribution {
+  new: number;
+  growing: number;
+  peaking: number;
+  declining: number;
+}
+
+export interface PulseTransitions {
+  toNew: number;
+  toGrowing: number;
+  toPeaking: number;
+  toDeclining: number;
+}
+
+// The rail-side aggregate block (distribution + transitions + editorial signal
+// string). Signal is currently derived server-side; kept nullable so pulse can
+// render without it during warm-up.
+export interface PulseRail {
+  signal: string | null;
+  distribution: PulseDistribution;
+  transitions6h: PulseTransitions;
+}
+
+export interface PulsePayload {
+  games: PulseCardGame[];
+  hero: PulseHero;
+  liveSince: number; // ms since epoch (feed_health.live_since)
+  rail: PulseRail;
+  degradedMode: boolean;
+}
+
+export interface PulseSearchResult {
+  id: number;
+  name: string;
+  creatorName: string;
+  genre: string | null;
+  thumbnail: string | null;
+  ccu: number;
+  lifecycle: PulseStage | null;
 }

@@ -43,6 +43,13 @@
       "when": 1786653635233,
       "tag": "0005_mixed_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786709962281,
+      "tag": "0006_short_the_stranger",
+      "breakpoints": true
     }
   ]
 }

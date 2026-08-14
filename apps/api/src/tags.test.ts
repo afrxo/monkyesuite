@@ -47,10 +47,16 @@ describe.skipIf(!DB_URL)("tag routes (Postgres integration)", () => {
       .onConflictDoNothing();
 
     app = new Hono();
-    app.use("*", async (c: { set: (k: string, v: string) => void }, next: () => Promise<void>) => {
-      c.set("userId", userId);
-      await next();
-    });
+    app.use(
+      "*",
+      async (
+        c: { set: (k: string, v: string) => void },
+        next: () => Promise<void>,
+      ) => {
+        c.set("userId", userId);
+        await next();
+      },
+    );
     app.route("/", tagRoutes());
     app.onError((err: unknown, c: Parameters<typeof sendError>[0]) =>
       sendError(c, toHttpError(err)),
@@ -59,8 +65,12 @@ describe.skipIf(!DB_URL)("tag routes (Postgres integration)", () => {
 
   afterAll(async () => {
     if (!db) return;
-    await db.delete(schema.gameTags).where(eq(schema.gameTags.universeId, universeId));
-    await db.delete(schema.games).where(eq(schema.games.universeId, universeId));
+    await db
+      .delete(schema.gameTags)
+      .where(eq(schema.gameTags.universeId, universeId));
+    await db
+      .delete(schema.games)
+      .where(eq(schema.games.universeId, universeId));
     if (createdTagId) {
       await db.delete(schema.tags).where(eq(schema.tags.id, createdTagId));
     }

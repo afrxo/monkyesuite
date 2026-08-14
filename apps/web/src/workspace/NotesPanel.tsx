@@ -56,27 +56,26 @@ export function NotesPanel({ projectId }: { projectId: string }) {
   };
 
   if (notes.isError) return <ScopedError error={notes.error} />;
-  if (notes.isPending)
-    return <p className="text-sm text-neutral-600">Loading…</p>;
+  if (notes.isPending) return <p className="text-sm text-text-5">Loading…</p>;
 
   return (
     <div className="flex flex-col gap-4">
       <form
         onSubmit={onSubmit}
-        className="flex flex-col gap-2 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3"
+        className="flex flex-col gap-2 rounded-lg border border-border-1 bg-surface-1/40 p-3"
       >
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title (optional)"
-          className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+          className="rounded-md border border-border-1 bg-surface-1 px-3 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
         />
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={2}
           placeholder="A quick observation or dated call…"
-          className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+          className="rounded-md border border-border-1 bg-surface-1 px-3 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
         />
         <div className="flex items-center gap-2">
           <input
@@ -84,7 +83,7 @@ export function NotesPanel({ projectId }: { projectId: string }) {
             onChange={(e) => setUniverse(e.target.value)}
             placeholder="universeId (optional)"
             inputMode="numeric"
-            className="w-48 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+            className="w-48 rounded-md border border-border-1 bg-surface-1 px-3 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
           />
           <button
             type="submit"
@@ -100,30 +99,26 @@ export function NotesPanel({ projectId }: { projectId: string }) {
       </form>
 
       {notes.data.length === 0 ? (
-        <p className="text-sm text-neutral-600">No notes pinned yet.</p>
+        <p className="text-sm text-text-5">No notes pinned yet.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {notes.data.map((n) => (
             <li
               key={n.id}
-              className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3 text-sm"
+              className="rounded-lg border border-border-1 bg-surface-1/40 p-3 text-sm"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
                   {n.title ? (
-                    <div className="font-medium text-neutral-200">
-                      {n.title}
-                    </div>
+                    <div className="font-medium text-text-2">{n.title}</div>
                   ) : null}
                   {n.body ? (
-                    <p className="whitespace-pre-wrap text-neutral-400">
-                      {n.body}
-                    </p>
+                    <p className="whitespace-pre-wrap text-text-3">{n.body}</p>
                   ) : null}
-                  <div className="mt-1 flex items-center gap-2 text-xs text-neutral-600">
+                  <div className="mt-1 flex items-center gap-2 text-xs text-text-5">
                     <span>{relTime(n.createdAt)}</span>
                     {n.game ? (
-                      <span className="rounded bg-neutral-800 px-1.5 py-px text-neutral-400">
+                      <span className="rounded bg-white/[0.04] px-1.5 py-px text-text-3">
                         {n.game.name}
                       </span>
                     ) : null}
@@ -132,7 +127,7 @@ export function NotesPanel({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   onClick={() => del.mutate(n.id)}
-                  className="text-xs text-neutral-600 hover:text-rose-300"
+                  className="text-xs text-text-5 hover:text-rose-300"
                 >
                   ✕
                 </button>

@@ -12,14 +12,14 @@ const LIFECYCLE_COLOR: Record<LifecycleStage, string> = {
   stable: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
   cooling: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
   declining: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
-  dormant: "bg-neutral-500/15 text-neutral-400 ring-neutral-500/30",
+  dormant: "bg-neutral-500/15 text-text-3 ring-text-4/30",
   revived: "bg-violet-500/15 text-violet-300 ring-violet-500/30",
 };
 
 export function LifecycleBadge({ stage }: { stage: LifecycleStage | null }) {
   if (!stage) {
     return (
-      <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500 ring-1 ring-neutral-700">
+      <span className="rounded-full bg-white/[0.04] px-2 py-0.5 text-xs text-text-4 ring-1 ring-border-1">
         no signal
       </span>
     );
@@ -44,10 +44,10 @@ export function Estimate({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-1 text-[11px] text-neutral-500"
+      className="inline-flex items-center gap-1 text-[11px] text-text-4"
       title={at ? new Date(at).toISOString() : "no timestamp"}
     >
-      <span className="rounded bg-neutral-800 px-1 py-px font-medium uppercase tracking-wide text-neutral-400">
+      <span className="rounded bg-white/[0.04] px-1 py-px font-medium uppercase tracking-wide text-text-3">
         {label}
       </span>
       <span>{relTime(at)}</span>
@@ -82,13 +82,13 @@ export function Stat({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs uppercase tracking-wide text-neutral-500">
+      <span className="text-xs uppercase tracking-wide text-text-4">
         {label}
       </span>
-      <span className="text-lg font-semibold tabular-nums text-neutral-100">
+      <span className="text-lg font-semibold tabular-nums text-text-1">
         {value}
       </span>
-      {hint ? <span className="text-xs text-neutral-500">{hint}</span> : null}
+      {hint ? <span className="text-xs text-text-4">{hint}</span> : null}
     </div>
   );
 }

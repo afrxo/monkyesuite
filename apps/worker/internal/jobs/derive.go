@@ -26,7 +26,7 @@ func (j *deriveJob) Name() string { return "derive" }
 func (j *deriveJob) Run(ctx context.Context, tick uint64) (sched.Result, error) {
 	if j.d.Store == nil {
 		slog.Warn("derive skipped: no store")
-		return sched.Result{Skipped: true, Metrics: deriveMetrics(0, 0)}, nil
+		return sched.Result{Skipped: true, Metrics: deriveMetrics(0, 0, 0)}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
@@ -34,24 +34,39 @@ func (j *deriveJob) Run(ctx context.Context, tick uint64) (sched.Result, error) 
 
 	stats, err := j.d.Store.DeriveStats(ctx, computedAt)
 	if err != nil {
-		return sched.Result{Metrics: deriveMetrics(0, 0)}, err
+		return sched.Result{Metrics: deriveMetrics(0, 0, 0)}, err
 	}
 	changes, err := j.d.Store.EmitLifecycleChanges(ctx, computedAt)
 	if err != nil {
 		slog.Warn("derive: lifecycle emit failed", "err", err)
 	}
-	slog.Info("derive done", "tick", tick, "stats_rows", stats, "lifecycle_changes", changes)
+	// Pulse-hot-path refresh runs after DeriveStats so it can read this tick's
+	// fresh game_stats row. Failures here don't fail the tick — the pulse feed
+	// degrades to the previous tick's snapshot (feed_health.degraded_mode goes
+	// true after 20 min without a refresh, which the UI surfaces).
+	pulse, err := j.d.Store.RefreshPulseStats(ctx, computedAt)
+	if err != nil {
+		slog.Warn("derive: pulse stats refresh failed", "err", err)
+	} else {
+		if _, err := j.d.Store.RefreshCohortStats(ctx); err != nil {
+			slog.Warn("derive: cohort stats refresh failed", "err", err)
+		}
+		if err := j.d.Store.RefreshFeedHealth(ctx); err != nil {
+			slog.Warn("derive: feed health refresh failed", "err", err)
+		}
+	}
+	slog.Info("derive done", "tick", tick, "stats_rows", stats, "lifecycle_changes", changes, "pulse_rows", pulse)
 	return sched.Result{
-		RowsWritten: int(stats) + int(changes),
-		Metrics:     deriveMetrics(stats, changes),
+		RowsWritten: int(stats) + int(changes) + int(pulse),
+		Metrics:     deriveMetrics(stats, changes, pulse),
 	}, nil
 }
 
 // deriveMetrics is the §9.6 contract for this job. statsRows separates the two
 // derive failures that look alike from outside: a crash (status=error) and a
 // success that wrote nothing (status=ok, statsRows=0) — the silent one.
-func deriveMetrics(statsRows, lifecycleEvents int64) map[string]any {
-	return map[string]any{"statsRows": statsRows, "lifecycleEvents": lifecycleEvents}
+func deriveMetrics(statsRows, lifecycleEvents, pulseRows int64) map[string]any {
+	return map[string]any{"statsRows": statsRows, "lifecycleEvents": lifecycleEvents, "pulseRows": pulseRows}
 }
 
 // trendDriftJob runs the daily confirmation-rule query (§2.3). The multi-game +

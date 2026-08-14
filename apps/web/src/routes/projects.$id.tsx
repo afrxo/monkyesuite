@@ -27,23 +27,22 @@ function WorkspacePage() {
   });
 
   if (project.isError) return <ScopedError error={project.error} />;
-  if (project.isPending)
-    return <p className="text-sm text-neutral-600">Loading…</p>;
+  if (project.isPending) return <p className="text-sm text-text-5">Loading…</p>;
 
   const p = project.data;
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-neutral-100">{p.name}</h1>
-          <p className="text-xs text-neutral-500">
+          <h1 className="text-xl font-bold text-text-1">{p.name}</h1>
+          <p className="text-xs text-text-4">
             /{p.slug} · {p.status} · {p.counts.members} member
             {p.counts.members === 1 ? "" : "s"} · {p.counts.openTasks} open
           </p>
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-neutral-800">
+      <div className="flex gap-1 border-b border-border-1">
         {TABS.map((t) => (
           <button
             key={t}
@@ -51,8 +50,8 @@ function WorkspacePage() {
             onClick={() => setTab(t)}
             className={`-mb-px border-b-2 px-3 py-2 text-sm capitalize transition ${
               tab === t
-                ? "border-neutral-100 text-neutral-100"
-                : "border-transparent text-neutral-500 hover:text-neutral-300"
+                ? "border-neutral-100 text-text-1"
+                : "border-transparent text-text-4 hover:text-text-2"
             }`}
           >
             {t}
@@ -88,7 +87,7 @@ function BoardTab({ projectId }: { projectId: string }) {
 
   if (board.isError) return <ScopedError error={board.error} />;
   if (board.isPending)
-    return <p className="text-sm text-neutral-600">Loading board…</p>;
+    return <p className="text-sm text-text-5">Loading board…</p>;
 
   return (
     <BoardView

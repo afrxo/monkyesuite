@@ -85,6 +85,36 @@ export const FEED_SORTS = [
 ] as const;
 export type FeedSort = (typeof FEED_SORTS)[number];
 
+// Pulse-page 4-stage lifecycle taxonomy (mirrors pulse_stage in schema).
+// Distinct from LIFECYCLE_STAGES above — pulse rolls the 7-stage analytical
+// classification into a compact feed-facing model. Order is display order.
+export const PULSE_STAGES = ["new", "growing", "peaking", "declining"] as const;
+export type PulseStage = (typeof PULSE_STAGES)[number];
+
+export const PULSE_FILTERS = [
+  "all",
+  "new",
+  "growing",
+  "peaking",
+  "declining",
+] as const;
+export type PulseFilter = (typeof PULSE_FILTERS)[number];
+
+// Same set as FEED_SORTS today — kept as a distinct union so pulse's sort
+// surface can diverge (e.g. "spike" gains a compound ranking on pulse only)
+// without silently changing /feed contract.
+export const PULSE_SORTS = [
+  "spike",
+  "trend",
+  "ccu",
+  "velocity",
+  "newest",
+] as const;
+export type PulseSort = (typeof PULSE_SORTS)[number];
+
+export const COHORT_BASES = ["genre", "global"] as const;
+export type CohortBasis = (typeof COHORT_BASES)[number];
+
 export const DISCOVER_SURFACES = [
   "trend-drift",
   "acceleration",

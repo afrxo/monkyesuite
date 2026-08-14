@@ -28,7 +28,7 @@ const LANE_LABEL: Record<TaskStatus, string> = {
 };
 
 const PRIORITY_DOT: Record<TaskPriority, string> = {
-  none: "bg-neutral-700",
+  none: "bg-white/[0.06]",
   low: "bg-sky-500",
   medium: "bg-amber-500",
   high: "bg-orange-500",
@@ -107,11 +107,11 @@ export function BoardView({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-neutral-500">Milestone</span>
+        <span className="text-xs text-text-4">Milestone</span>
         <select
           value={milestoneFilter}
           onChange={(e) => onFilter(e.target.value as MilestoneFilter)}
-          className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-sm text-neutral-200"
+          className="rounded-md border border-border-1 bg-surface-1 px-2 py-1 text-sm text-text-2"
         >
           <option value="all">All</option>
           <option value="none">No milestone</option>
@@ -177,7 +177,7 @@ function Lane({
     // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drag-drop lane target
     <div
       className={`flex w-72 shrink-0 flex-col rounded-lg border p-2 ${
-        over ? "border-neutral-600 bg-neutral-900" : "border-neutral-800"
+        over ? "border-text-5 bg-surface-1" : "border-border-1"
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -191,10 +191,10 @@ function Lane({
       }}
     >
       <div className="mb-2 flex items-center justify-between px-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-3">
           {LANE_LABEL[status]}
         </span>
-        <span className="text-xs text-neutral-600">{count}</span>
+        <span className="text-xs text-text-5">{count}</span>
       </div>
       <div className="flex flex-1 flex-col gap-2">{children}</div>
     </div>
@@ -238,7 +238,7 @@ function Card({
       }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
-      className="cursor-grab rounded-lg border border-neutral-800 bg-neutral-950/60 p-2.5 text-sm active:cursor-grabbing"
+      className="cursor-grab rounded-lg border border-border-1 bg-surface-0/60 p-2.5 text-sm active:cursor-grabbing"
     >
       <div className="flex items-start gap-2">
         <span
@@ -248,7 +248,7 @@ function Card({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex-1 text-left text-neutral-100"
+          className="flex-1 text-left text-text-1"
         >
           {task.title}
         </button>
@@ -261,17 +261,15 @@ function Card({
           </Chip>
         ) : null}
         {task.game ? (
-          <Chip className="bg-neutral-800 text-neutral-300">
-            {task.game.name}
-          </Chip>
+          <Chip className="bg-white/[0.04] text-text-2">{task.game.name}</Chip>
         ) : null}
         {task.assignee ? (
-          <Chip className="bg-neutral-800 text-neutral-400">
+          <Chip className="bg-white/[0.04] text-text-3">
             {task.assignee.name ?? task.assignee.email}
           </Chip>
         ) : null}
         {task.subtasks.length ? (
-          <Chip className="bg-neutral-800 text-neutral-500">
+          <Chip className="bg-white/[0.04] text-text-4">
             {task.subtasks.filter((s) => s.status === "done").length}/
             {task.subtasks.length}
           </Chip>
@@ -279,9 +277,9 @@ function Card({
       </div>
 
       {open ? (
-        <div className="mt-2 flex flex-col gap-2 border-t border-neutral-800 pt-2 pl-4">
+        <div className="mt-2 flex flex-col gap-2 border-t border-border-1 pt-2 pl-4">
           {task.body ? (
-            <p className="whitespace-pre-wrap text-xs text-neutral-400">
+            <p className="whitespace-pre-wrap text-xs text-text-3">
               {task.body}
             </p>
           ) : null}
@@ -327,9 +325,7 @@ function Subtasks({ task, onChanged }: { task: Task; onChanged: () => void }) {
           />
           <span
             className={
-              s.status === "done"
-                ? "text-neutral-600 line-through"
-                : "text-neutral-300"
+              s.status === "done" ? "text-text-5 line-through" : "text-text-2"
             }
           >
             {s.title}
@@ -346,7 +342,7 @@ function Subtasks({ task, onChanged }: { task: Task; onChanged: () => void }) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="+ subtask"
-          className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-600"
+          className="w-full rounded border border-border-1 bg-surface-1 px-2 py-1 text-xs text-text-2 outline-none focus:border-text-5"
         />
       </form>
     </div>
@@ -380,7 +376,7 @@ function NewTask({
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="+ card"
-        className="w-full rounded-md border border-dashed border-neutral-800 bg-transparent px-2 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-600"
+        className="w-full rounded-md border border-dashed border-border-1 bg-transparent px-2 py-1.5 text-xs text-text-2 outline-none focus:border-text-5"
       />
     </form>
   );
@@ -409,7 +405,7 @@ function NewMilestone({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="ml-auto text-xs text-neutral-500 hover:text-neutral-300"
+        className="ml-auto text-xs text-text-4 hover:text-text-2"
       >
         + milestone
       </button>
@@ -429,12 +425,9 @@ function NewMilestone({
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Milestone name"
-        className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-600"
+        className="rounded-md border border-border-1 bg-surface-1 px-2 py-1 text-xs text-text-2 outline-none focus:border-text-5"
       />
-      <button
-        type="submit"
-        className="text-xs text-neutral-300 hover:text-neutral-100"
-      >
+      <button type="submit" className="text-xs text-text-2 hover:text-text-1">
         add
       </button>
     </form>

@@ -45,36 +45,31 @@ export function MembersPanel({
   };
 
   if (members.isError) return <ScopedError error={members.error} />;
-  if (members.isPending)
-    return <p className="text-sm text-neutral-600">Loading…</p>;
+  if (members.isPending) return <p className="text-sm text-text-5">Loading…</p>;
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-400">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-3">
           Members
         </h2>
         <ul className="flex flex-col gap-1">
           {members.data.map((m) => (
             <li
               key={m.id}
-              className="flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-sm"
+              className="flex items-center justify-between rounded-md border border-border-1 bg-surface-1/40 px-3 py-2 text-sm"
             >
-              <span className="text-neutral-200">
+              <span className="text-text-2">
                 {m.user.name ?? m.user.email}
-                <span className="ml-2 text-xs text-neutral-500">
-                  {m.user.email}
-                </span>
+                <span className="ml-2 text-xs text-text-4">{m.user.email}</span>
               </span>
               <span className="flex items-center gap-3">
-                <span className="text-xs capitalize text-neutral-500">
-                  {m.role}
-                </span>
+                <span className="text-xs capitalize text-text-4">{m.role}</span>
                 {isOwner && m.role === "member" ? (
                   <button
                     type="button"
                     onClick={() => remove.mutate(m.userId)}
-                    className="text-xs text-neutral-600 hover:text-rose-300"
+                    className="text-xs text-text-5 hover:text-rose-300"
                   >
                     remove
                   </button>
@@ -87,7 +82,7 @@ export function MembersPanel({
 
       {isOwner ? (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-400">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-3">
             Add collaborator
           </h2>
           <form onSubmit={onAddMember} className="mb-3 flex items-center gap-2">
@@ -96,7 +91,7 @@ export function MembersPanel({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="existing user's username"
-              className="flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+              className="flex-1 rounded-md border border-border-1 bg-surface-1 px-3 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
             />
             <button
               type="submit"
@@ -111,7 +106,7 @@ export function MembersPanel({
               {addMember.error.message}
             </p>
           ) : null}
-          <p className="text-xs text-neutral-600">
+          <p className="text-xs text-text-5">
             Up to two collaborators per project. The user must already have an
             account — accounts are created by an administrator.
           </p>

@@ -35,7 +35,7 @@ export function GameNotes({
       {user ? (
         <Compose universeId={universeId} onChanged={invalidate} />
       ) : (
-        <p className="text-xs text-neutral-600">
+        <p className="text-xs text-text-5">
           <Link to="/sign-in" className="text-indigo-400 hover:underline">
             Sign in
           </Link>{" "}
@@ -45,7 +45,7 @@ export function GameNotes({
       )}
 
       {notes.data.length === 0 ? (
-        <p className="text-sm text-neutral-600">No notes yet.</p>
+        <p className="text-sm text-text-5">No notes yet.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {notes.data.map((n) => (
@@ -81,20 +81,20 @@ function Compose({
   return (
     <form
       onSubmit={onSubmit}
-      className="flex flex-col gap-2 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3"
+      className="flex flex-col gap-2 rounded-lg border border-border-1 bg-surface-1/40 p-3"
     >
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
         rows={2}
         placeholder="Add a note about this game…"
-        className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+        className="rounded-md border border-border-1 bg-surface-1 px-3 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
       />
       <div className="flex items-center gap-3">
         <select
           value={visibility}
           onChange={(e) => setVisibility(e.target.value as NoteVisibility)}
-          className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-300"
+          className="rounded-md border border-border-1 bg-surface-1 px-2 py-1 text-xs text-text-2"
         >
           <option value="shared">Shared (team)</option>
           <option value="private">Private (only me)</option>
@@ -126,16 +126,16 @@ function NoteRow({
     onSuccess: onChanged,
   });
   return (
-    <li className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3 text-sm">
-      <div className="mb-1 flex items-center gap-2 text-xs text-neutral-500">
-        <span className="text-neutral-300">
+    <li className="rounded-lg border border-border-1 bg-surface-1/40 p-3 text-sm">
+      <div className="mb-1 flex items-center gap-2 text-xs text-text-4">
+        <span className="text-text-2">
           {note.isOwn ? "You" : (note.authorName ?? note.authorId)}
         </span>
         <span
           className={`rounded px-1.5 py-px capitalize ${
             note.visibility === "private"
               ? "bg-amber-500/10 text-amber-300"
-              : "bg-neutral-800 text-neutral-400"
+              : "bg-white/[0.04] text-text-3"
           }`}
         >
           {note.visibility}
@@ -145,13 +145,13 @@ function NoteRow({
           <button
             type="button"
             onClick={() => del.mutate()}
-            className="ml-auto text-neutral-600 hover:text-rose-300"
+            className="ml-auto text-text-5 hover:text-rose-300"
           >
             delete
           </button>
         ) : null}
       </div>
-      <p className="whitespace-pre-wrap text-neutral-300">{note.body}</p>
+      <p className="whitespace-pre-wrap text-text-2">{note.body}</p>
     </li>
   );
 }

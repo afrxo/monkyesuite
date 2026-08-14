@@ -19,6 +19,10 @@ var requiredMetricKeys = map[string][]string{
 	"derive":      {"statsRows", "lifecycleEvents"},
 	"trend-drift": {"confirmed", "minRising"},
 	"demand":      {"terms", "ytQuotaUsed"},
+	// candidates/resolved is the backlog pair: candidates is what is still
+	// missing an icon, resolved is what this tick fixed. A panel showing only
+	// "resolved" cannot tell a drained backlog from a stalled one.
+	"icon-backfill": {"candidates", "resolved"},
 }
 
 // sharedMetricKeys ride on every row, added by the scheduler from the run's call

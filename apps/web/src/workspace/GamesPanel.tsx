@@ -47,27 +47,26 @@ export function GamesPanel({ projectId }: { projectId: string }) {
   };
 
   if (games.isError) return <ScopedError error={games.error} />;
-  if (games.isPending)
-    return <p className="text-sm text-neutral-600">Loading…</p>;
+  if (games.isPending) return <p className="text-sm text-text-5">Loading…</p>;
 
   return (
     <div className="flex flex-col gap-4">
       <form
         onSubmit={onSubmit}
-        className="flex flex-wrap items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3"
+        className="flex flex-wrap items-center gap-2 rounded-lg border border-border-1 bg-surface-1/40 p-3"
       >
         <input
           value={universe}
           onChange={(e) => setUniverse(e.target.value)}
           placeholder="universeId"
           inputMode="numeric"
-          className="w-40 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+          className="w-40 rounded-md border border-border-1 bg-surface-1 px-3 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
         />
         <input
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="why pin it (optional)"
-          className="flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+          className="flex-1 rounded-md border border-border-1 bg-surface-1 px-3 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
         />
         <button
           type="submit"
@@ -82,7 +81,7 @@ export function GamesPanel({ projectId }: { projectId: string }) {
       </form>
 
       {games.data.length === 0 ? (
-        <p className="text-sm text-neutral-600">
+        <p className="text-sm text-text-5">
           No games pinned. A project works fine without any.
         </p>
       ) : (
@@ -90,33 +89,33 @@ export function GamesPanel({ projectId }: { projectId: string }) {
           {games.data.map((g) => (
             <li
               key={g.universeId}
-              className="flex items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3"
+              className="flex items-center gap-3 rounded-lg border border-border-1 bg-surface-1/40 p-3"
             >
               {g.iconUrl ? (
                 <img
                   src={g.iconUrl}
                   alt=""
-                  className="h-10 w-10 shrink-0 rounded-lg bg-neutral-800 object-cover"
+                  className="h-10 w-10 shrink-0 rounded-lg bg-white/[0.04] object-cover"
                 />
               ) : (
-                <div className="h-10 w-10 shrink-0 rounded-lg bg-neutral-800" />
+                <div className="h-10 w-10 shrink-0 rounded-lg bg-white/[0.04]" />
               )}
               <div className="min-w-0 flex-1">
                 <Link
                   to="/games/$id"
                   params={{ id: String(g.universeId) }}
-                  className="truncate font-medium text-neutral-100 hover:underline"
+                  className="truncate font-medium text-text-1 hover:underline"
                 >
                   {g.name}
                 </Link>
                 {g.note ? (
-                  <p className="truncate text-xs text-neutral-500">{g.note}</p>
+                  <p className="truncate text-xs text-text-4">{g.note}</p>
                 ) : null}
               </div>
               <button
                 type="button"
                 onClick={() => unlink.mutate(g.universeId)}
-                className="text-xs text-neutral-600 hover:text-rose-300"
+                className="text-xs text-text-5 hover:text-rose-300"
               >
                 unpin
               </button>

@@ -53,8 +53,8 @@ export const Route = createFileRoute("/games/$id")({
   },
   component: GameDetailPage,
   notFoundComponent: () => (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-10 text-center">
-      <p className="text-neutral-300">That game isn’t tracked.</p>
+    <div className="rounded-lg border border-border-1 bg-surface-1/40 p-10 text-center">
+      <p className="text-text-2">That game isn’t tracked.</p>
       <Link
         to="/"
         className="mt-2 inline-block text-sm text-indigo-400 hover:underline"
@@ -83,7 +83,7 @@ function GameDetailPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <Link to="/" className="text-sm text-neutral-500 hover:text-neutral-300">
+      <Link to="/" className="text-sm text-text-4 hover:text-text-2">
         ← Pulse
       </Link>
 
@@ -93,24 +93,24 @@ function GameDetailPage() {
           <img
             src={game.iconUrl}
             alt=""
-            className="h-20 w-20 rounded-2xl bg-neutral-800 object-cover"
+            className="h-20 w-20 rounded-2xl bg-white/[0.04] object-cover"
           />
         ) : (
-          <div className="h-20 w-20 rounded-2xl bg-neutral-800" />
+          <div className="h-20 w-20 rounded-2xl bg-white/[0.04]" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold text-neutral-100">{game.name}</h1>
+            <h1 className="text-2xl font-bold text-text-1">{game.name}</h1>
             <LifecycleBadge stage={s?.lifecycle ?? null} />
             <SortRank sort={game.currentSort} rank={game.currentSortRank} />
           </div>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-text-4">
             {game.creator?.name ?? game.creator?.creatorId ?? "unknown creator"}
             {game.robloxGenre ? ` · ${game.robloxGenre}` : ""}
             {game.maxPlayers ? ` · ${game.maxPlayers}p servers` : ""}
           </p>
           {game.description ? (
-            <p className="mt-2 max-w-2xl text-sm text-neutral-400">
+            <p className="mt-2 max-w-2xl text-sm text-text-3">
               {game.description}
             </p>
           ) : null}
@@ -155,13 +155,13 @@ function GameDetailPage() {
                     key={`${snap.sortName}-${snap.capturedAt}`}
                     className="flex items-center justify-between"
                   >
-                    <span className="capitalize text-neutral-300">
+                    <span className="capitalize text-text-2">
                       {snap.sortName.replace(/-/g, " ")}
                     </span>
-                    <span className="tabular-nums text-neutral-400">
+                    <span className="tabular-nums text-text-3">
                       #{snap.rank}
                     </span>
-                    <span className="text-xs text-neutral-600">
+                    <span className="text-xs text-text-5">
                       {relTime(snap.capturedAt)}
                     </span>
                   </li>
@@ -178,10 +178,10 @@ function GameDetailPage() {
             <ul className="flex flex-col gap-1.5 text-sm">
               {lifecycle.slice(0, 8).map((e) => (
                 <li key={e.id} className="flex items-center gap-2">
-                  <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-xs capitalize text-neutral-300">
+                  <span className="rounded bg-white/[0.04] px-1.5 py-0.5 text-xs capitalize text-text-2">
                     {e.type.replace(/_/g, " ")}
                   </span>
-                  <span className="text-xs text-neutral-600">
+                  <span className="text-xs text-text-5">
                     {relTime(e.detectedAt)}
                   </span>
                 </li>
@@ -200,10 +200,10 @@ function GameDetailPage() {
             {tags.map((t) => (
               <span
                 key={t.id}
-                className="rounded-md bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300"
+                className="rounded-md bg-white/[0.04] px-2 py-0.5 text-xs text-text-2"
                 title={t.description ?? undefined}
               >
-                <span className="text-neutral-500">{t.axis}:</span> {t.label}
+                <span className="text-text-4">{t.axis}:</span> {t.label}
               </span>
             ))}
           </div>
@@ -219,16 +219,16 @@ function GameDetailPage() {
             <div className="flex flex-col gap-3 text-sm">
               {monetization.passes.length ? (
                 <div>
-                  <div className="mb-1 text-xs uppercase tracking-wide text-neutral-500">
+                  <div className="mb-1 text-xs uppercase tracking-wide text-text-4">
                     Game passes
                   </div>
                   <ul className="flex flex-col gap-1">
                     {monetization.passes.map((p) => (
                       <li key={p.passId} className="flex justify-between">
-                        <span className="text-neutral-300">
+                        <span className="text-text-2">
                           {p.name ?? `#${p.passId}`}
                         </span>
-                        <span className="tabular-nums text-neutral-400">
+                        <span className="tabular-nums text-text-3">
                           R$ {fmtFull(p.priceRobux)}
                         </span>
                       </li>
@@ -238,16 +238,16 @@ function GameDetailPage() {
               ) : null}
               {monetization.products.length ? (
                 <div>
-                  <div className="mb-1 text-xs uppercase tracking-wide text-neutral-500">
+                  <div className="mb-1 text-xs uppercase tracking-wide text-text-4">
                     Dev products
                   </div>
                   <ul className="flex flex-col gap-1">
                     {monetization.products.map((p) => (
                       <li key={p.productId} className="flex justify-between">
-                        <span className="text-neutral-300">
+                        <span className="text-text-2">
                           {p.name ?? `#${p.productId}`}
                         </span>
-                        <span className="tabular-nums text-neutral-400">
+                        <span className="tabular-nums text-text-3">
                           R$ {fmtFull(p.priceRobux)}
                         </span>
                       </li>
@@ -272,9 +272,9 @@ function GameDetailPage() {
                     key={`${term.term}-${term.kind}`}
                     className="flex items-center justify-between"
                   >
-                    <span className="text-neutral-300">
+                    <span className="text-text-2">
                       {term.term}
-                      <span className="ml-1 text-xs text-neutral-600">
+                      <span className="ml-1 text-xs text-text-5">
                         ({term.kind})
                       </span>
                       {term.heating ? (
@@ -286,7 +286,7 @@ function GameDetailPage() {
                         </span>
                       ) : null}
                     </span>
-                    <span className="tabular-nums text-neutral-400">
+                    <span className="tabular-nums text-text-3">
                       trends {last?.trendsScore ?? "—"}
                     </span>
                   </li>
@@ -306,18 +306,16 @@ function GameDetailPage() {
             {events.map((e) => (
               <li
                 key={e.eventId}
-                className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3"
+                className="rounded-lg border border-border-1 bg-surface-1/40 p-3"
               >
-                <div className="font-medium text-neutral-200">
+                <div className="font-medium text-text-2">
                   {e.title ?? "Event"}
                 </div>
                 {e.subtitle ? (
-                  <div className="text-xs text-neutral-500">{e.subtitle}</div>
+                  <div className="text-xs text-text-4">{e.subtitle}</div>
                 ) : null}
                 {e.tagline ? (
-                  <div className="mt-1 text-xs text-neutral-400">
-                    {e.tagline}
-                  </div>
+                  <div className="mt-1 text-xs text-text-3">{e.tagline}</div>
                 ) : null}
               </li>
             ))}
@@ -331,7 +329,7 @@ function GameDetailPage() {
       </Section>
 
       {/* history depth footer */}
-      <p className="text-xs text-neutral-700">
+      <p className="text-xs text-text-disabled">
         {fmtFull(metrics.total)} raw snapshots · {fmtFull(stats.total)} derived
         stat rows. All numbers are estimates from public Roblox data.
       </p>
@@ -351,11 +349,11 @@ function Section({
   return (
     <section>
       <div className="mb-3 flex items-center gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-text-3">
           {title}
         </h2>
         {estimateAt !== undefined ? <Estimate at={estimateAt} /> : null}
-        <div className="h-px flex-1 bg-neutral-800" />
+        <div className="h-px flex-1 bg-white/[0.04]" />
       </div>
       {children}
     </section>
@@ -363,7 +361,7 @@ function Section({
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <div className="text-sm text-neutral-600">{children}</div>;
+  return <div className="text-sm text-text-5">{children}</div>;
 }
 
 // Minimal inline SVG sparkline of CCU over the returned window. No chart lib.
@@ -384,7 +382,7 @@ function Sparkline({ points }: { points: GameMetric[] }) {
   const area = `0,${h} ${line} ${w},${h}`;
 
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
+    <div className="rounded-lg border border-border-1 bg-surface-0/50 p-3">
       <svg
         viewBox={`0 0 ${w} ${h}`}
         className="h-32 w-full"
@@ -407,7 +405,7 @@ function Sparkline({ points }: { points: GameMetric[] }) {
           </linearGradient>
         </defs>
       </svg>
-      <div className="mt-1 flex justify-between text-[10px] text-neutral-600">
+      <div className="mt-1 flex justify-between text-[10px] text-text-5">
         <span>{relTime(points[0]?.capturedAt)}</span>
         <span>peak {fmtCompact(max)}</span>
         <span>now</span>

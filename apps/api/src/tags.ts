@@ -63,9 +63,7 @@ export function tagRoutes(): Hono<AppEnv> {
     if (!body.success) {
       // A body whose axis isn't one of the five enum values lands here — the
       // canonical 422 free-text rejection (03-tagging.md, 07-api.md §7.4).
-      throw validationError(
-        body.error.issues[0]?.message ?? "Invalid tag.",
-      );
+      throw validationError(body.error.issues[0]?.message ?? "Invalid tag.");
     }
     let row: typeof tags.$inferSelect | undefined;
     try {
@@ -89,19 +87,22 @@ export function tagRoutes(): Hono<AppEnv> {
     const userId = requireUser(c);
     const universeId = parseParam(universeIdSchema, c.req.param("universeId"));
     if (!(await gameExists(universeId))) throw notFound("Unknown game.");
-    const body = applyTagSchema.safeParse(
-      await c.req.json().catch(() => ({})),
-    );
+    const body = applyTagSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) throw validationError("Invalid tag application.");
     const { tagId } = body.data;
 
-    const [tag] = await db.select().from(tags).where(eq(tags.id, tagId)).limit(1);
+    const [tag] = await db
+      .select()
+      .from(tags)
+      .where(eq(tags.id, tagId))
+      .limit(1);
     if (!tag) throw notFound("Unknown tag.");
 
     try {
       await db.insert(gameTags).values({ universeId, tagId, addedBy: userId });
     } catch (err) {
-      if (isUniqueViolation(err)) throw conflict("Tag already applied to this game.");
+      if (isUniqueViolation(err))
+        throw conflict("Tag already applied to this game.");
       throw err;
     }
     return c.json(mapTag(tag), 201);
@@ -113,7 +114,9 @@ export function tagRoutes(): Hono<AppEnv> {
     const tagId = parseParam(uuidSchema, c.req.param("tagId"));
     const deleted = await db
       .delete(gameTags)
-      .where(and(eq(gameTags.universeId, universeId), eq(gameTags.tagId, tagId)))
+      .where(
+        and(eq(gameTags.universeId, universeId), eq(gameTags.tagId, tagId)),
+      )
       .returning({ tagId: gameTags.tagId });
     if (deleted.length === 0) throw notFound("No such tag application.");
     return c.body(null, 204);

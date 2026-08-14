@@ -1,0 +1,18 @@
+export const MECHANIC_LABELS: Record<string, string> = {
+  tower_defense: "Tower defense",
+  idle_simulator: "Idle / simulator",
+  obby: "Obby / parkour",
+  roleplay_town: "Roleplay town",
+  horror: "Horror",
+  pvp_fighting: "PvP / fighting",
+  survival_craft: "Survival / craft",
+  racing_drive: "Racing / driving",
+  cozy_farming: "Cozy farming",
+  anime_cosmetic: "Anime / collector",
+  card_battler: "Card battler",
+  puzzle_maze: "Puzzle / maze",
+  rhythm_music: "Rhythm / music",
+  sport_basketball: "Sports",
+  shooter_gun: "Shooter",
+  horse_pet: "Pets / animals",
+};

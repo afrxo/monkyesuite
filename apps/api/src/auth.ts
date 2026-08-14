@@ -9,9 +9,9 @@ import {
   users,
   verifications,
 } from "@monkyesuite/database";
-import { APIError, createAuthMiddleware } from "better-auth/api";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { eq } from "drizzle-orm";
 import { db } from "./db.js";
 

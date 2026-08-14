@@ -160,6 +160,33 @@ func (s *Store) TouchSortSeen(ctx context.Context, ids []int64) error {
 	return err
 }
 
+// TrackedWithoutIcon returns tracked-game universeIds missing icon_url, capped
+// at `limit`. Pulse consumes icon_url directly on read; a nightly backfill call
+// keeps stragglers from the discover-only prewarm path filled in.
+func (s *Store) TrackedWithoutIcon(ctx context.Context, limit int) ([]int64, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.pool.Query(ctx,
+		`select universe_id from games
+		 where is_tracked and icon_url is null
+		 order by first_seen_at desc
+		 limit $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]int64, 0, limit)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // SetIcons updates games.icon_url for the resolved icons.
 func (s *Store) SetIcons(ctx context.Context, icons map[int64]string) error {
 	if len(icons) == 0 {

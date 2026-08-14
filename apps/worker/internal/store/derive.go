@@ -17,6 +17,12 @@ var (
 	sqlLifecycleEmit string
 	//go:embed sql/trend_drift.sql
 	sqlTrendDrift string
+	//go:embed sql/pulse_stats.sql
+	sqlPulseStats string
+	//go:embed sql/pulse_cohort.sql
+	sqlPulseCohort string
+	//go:embed sql/pulse_health.sql
+	sqlPulseHealth string
 )
 
 // DeriveStats recomputes game_stats for every tracked game as of computedAt,
@@ -38,6 +44,35 @@ func (s *Store) EmitLifecycleChanges(ctx context.Context, computedAt time.Time) 
 		return 0, err
 	}
 	return ct.RowsAffected(), nil
+}
+
+// RefreshPulseStats upserts the game_stats_latest hot-path table from this
+// tick's fresh game_stats row + freshest game_metrics reading + a 24h-ago
+// window. Idempotent: re-running the same tick just rewrites the same values.
+func (s *Store) RefreshPulseStats(ctx context.Context, computedAt time.Time) (int64, error) {
+	ct, err := s.pool.Exec(ctx, sqlPulseStats, computedAt)
+	if err != nil {
+		return 0, err
+	}
+	return ct.RowsAffected(), nil
+}
+
+// RefreshCohortStats rebuilds cohort_stats from game_stats_latest. Truncates
+// and reinserts inside one implicit transaction (Exec on a single script) so
+// no partial state is visible.
+func (s *Store) RefreshCohortStats(ctx context.Context) (int64, error) {
+	ct, err := s.pool.Exec(ctx, sqlPulseCohort)
+	if err != nil {
+		return 0, err
+	}
+	return ct.RowsAffected(), nil
+}
+
+// RefreshFeedHealth upserts the feed_health singleton (id=1) from the current
+// game_stats_latest + recent game_stats + lifecycle_events state.
+func (s *Store) RefreshFeedHealth(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, sqlPulseHealth)
+	return err
 }
 
 // TrendRow is one confirmed tag direction from the daily trend-drift query.

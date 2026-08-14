@@ -9,6 +9,8 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { Button } from "../components/ui/button";
+import { TooltipProvider } from "../components/ui/tooltip";
 import { useSession, useSignOut } from "../lib/auth";
 import appCss from "../styles.css?url";
 
@@ -19,6 +21,11 @@ import appCss from "../styles.css?url";
 // never scoped data.
 const SIGNED_OUT_OK = new Set(["/sign-in"]);
 
+// Routes that render their own full-bleed chrome (e.g. Pulse renders its own
+// topbar + hero). These skip the wrapper container + suite nav bar so the
+// ported page keeps its own layout intact.
+const FULL_BLEED = new Set<string>(["/"]);
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -26,7 +33,36 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "monkyesuite — Pulse" },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      // Preconnect the Roblox thumbnail CDNs pulse cards will start requesting
+      // as soon as the payload lands. Shaves ~100ms off first thumb paint.
+      {
+        rel: "preconnect",
+        href: "https://tr.rbxcdn.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "preconnect",
+        href: "https://t0.rbxcdn.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "preconnect",
+        href: "https://t1.rbxcdn.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "preconnect",
+        href: "https://t2.rbxcdn.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "preconnect",
+        href: "https://t3.rbxcdn.com",
+        crossOrigin: "anonymous",
+      },
+    ],
   }),
   component: RootComponent,
 });
@@ -41,31 +77,47 @@ function RootComponent() {
   );
   return (
     <QueryClientProvider client={queryClient}>
-      <RootDocument>
-        <AuthGate>
-          <div className="mx-auto max-w-6xl px-4 py-6">
-            <header className="mb-8 flex items-center justify-between border-b border-neutral-800 pb-4">
-              <nav className="flex items-baseline gap-5">
-                <Link to="/" className="flex items-baseline gap-2">
-                  <span className="text-xl font-bold tracking-tight text-neutral-100">
-                    monkyesuite
-                  </span>
-                  <span className="text-sm text-neutral-500">Pulse</span>
-                </Link>
-                <Link
-                  to="/projects"
-                  className="text-sm text-neutral-400 hover:text-neutral-100 [&.active]:text-neutral-100"
-                >
-                  Projects
-                </Link>
-              </nav>
-              <AuthNav />
-            </header>
-            <Outlet />
-          </div>
-        </AuthGate>
-      </RootDocument>
+      <TooltipProvider delayDuration={200}>
+        <RootDocument>
+          <AuthGate>
+            <Layout />
+          </AuthGate>
+        </RootDocument>
+      </TooltipProvider>
     </QueryClientProvider>
+  );
+}
+
+function Layout() {
+  const location = useLocation();
+  if (FULL_BLEED.has(location.pathname)) {
+    // Pulse owns the whole surface: its own topbar (AppHeader / feed/Topbar)
+    // + hero + rail. Wrapping it in the suite nav would double-chrome it.
+    return <Outlet />;
+  }
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <header className="mb-8 flex items-center justify-between border-b border-border-1 pb-4">
+        <nav className="flex items-baseline gap-5">
+          <Link to="/" className="flex items-baseline gap-2">
+            <span className="text-xl font-semibold tracking-tight text-text-1">
+              monkyesuite
+            </span>
+            <span className="font-serif text-base italic text-text-4">
+              Pulse
+            </span>
+          </Link>
+          <Link
+            to="/projects"
+            className="text-sm text-text-3 transition-colors hover:text-text-1 [&.active]:text-text-1"
+          >
+            Projects
+          </Link>
+        </nav>
+        <AuthNav />
+      </header>
+      <Outlet />
+    </div>
   );
 }
 
@@ -93,24 +145,21 @@ function AuthGate({ children }: { children: ReactNode }) {
 function AuthNav() {
   const { user, isPending } = useSession();
   const signOut = useSignOut();
-  if (isPending) return <span className="text-xs text-neutral-600">…</span>;
+  if (isPending) return <span className="text-xs text-text-5">…</span>;
   if (!user) {
     return (
-      <Link
-        to="/sign-in"
-        className="rounded-md bg-neutral-100 px-3 py-1 text-sm font-medium text-neutral-900 hover:bg-white"
-      >
-        Sign in
-      </Link>
+      <Button asChild size="sm">
+        <Link to="/sign-in">Sign in</Link>
+      </Button>
     );
   }
   return (
     <div className="flex items-center gap-3 text-sm">
-      <span className="text-neutral-400">{user.name ?? user.email}</span>
+      <span className="text-text-3">{user.name ?? user.email}</span>
       <button
         type="button"
         onClick={() => signOut.mutate()}
-        className="text-neutral-500 hover:text-neutral-200"
+        className="text-text-4 transition-colors hover:text-text-2"
       >
         Sign out
       </button>

@@ -4,15 +4,18 @@
 // in SQL, never in a big in-memory array (CLAUDE.md CPU strategy).
 
 import {
+  cohortStats,
   creators,
   demandSnapshots,
   demandTerms,
   devProducts,
+  feedHealth,
   gameEvents,
   gameMetrics,
   gameNotes,
   gamePasses,
   gameStats,
+  gameStatsLatest,
   games,
   gameTags,
   lifecycleEvents,
@@ -21,6 +24,7 @@ import {
   users,
 } from "@monkyesuite/database";
 import type {
+  CohortBasis,
   DemandOverlay,
   FeedItem,
   FeedQuery,
@@ -33,12 +37,31 @@ import type {
   MetricsQuery,
   Monetization,
   Paged,
+  PulseCardGame,
+  PulseFilter,
+  PulsePayload,
+  PulseSearchResult,
+  PulseSort,
+  PulseStage,
   SortSnapshot,
   Tag,
   TagAxis,
   TimeseriesQuery,
 } from "@monkyesuite/shared";
-import { and, asc, desc, eq, gte, lte, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  ilike,
+  lt,
+  lte,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "./db.js";
 import { iso, isoReq } from "./serialize.js";
@@ -647,5 +670,249 @@ export async function getGameNotes(
     isOwn: userId ? r.authorId === userId : false,
     createdAt: isoReq(r.createdAt),
     updatedAt: isoReq(r.updatedAt),
+  }));
+}
+
+/* --------------------------------- pulse ---------------------------------- */
+
+// Bounded by tlw's page shape. Kept server-side (not a query param) so a
+// misconfigured client cannot ask for the whole table.
+const PULSE_LIMIT = 24;
+// Match tlw's Ln-scaled compound rank when sort=spike:
+//   (spike + min(trend*3, spike*0.5)) * ln(latestCcu + 1)
+// Rendered as raw SQL because we want the planner to sort on the expression
+// without materializing intermediates.
+function pulseSpikeOrder(): SQL {
+  return sql`(${gameStatsLatest.spikeScore} + least(${gameStatsLatest.trendScore} * 3, ${gameStatsLatest.spikeScore} * 0.5)) * ln(${gameStatsLatest.latestCcu} + 1) desc nulls last`;
+}
+function pulseOrder(sort: PulseSort): SQL {
+  switch (sort) {
+    case "trend":
+      return sql`${gameStatsLatest.trendScore} desc nulls last`;
+    case "ccu":
+      return sql`${gameStatsLatest.latestCcu} desc nulls last`;
+    case "velocity":
+      return sql`${gameStatsLatest.delta24hPct} desc nulls last`;
+    case "newest":
+      return sql`${games.createdAt} desc nulls last`;
+    default:
+      return pulseSpikeOrder();
+  }
+}
+
+// Filter gates mirror tlw's loadFeed. Guards against near-empty pages: the
+// "all" filter falls back to top-by-CCU when strict gates would yield <6 rows.
+function pulseFilters(filter: PulseFilter): SQL[] {
+  const strict: SQL[] = [];
+  switch (filter) {
+    case "new":
+      strict.push(
+        gte(games.createdAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
+        gte(gameStatsLatest.latestCcu, 100),
+        ne(gameStatsLatest.pulseStage, "declining"),
+      );
+      break;
+    case "growing":
+      strict.push(
+        eq(gameStatsLatest.pulseStage, "growing"),
+        gte(gameStatsLatest.latestCcu, 200),
+        lt(gameStatsLatest.latestCcu, 25_000),
+        gte(gameStatsLatest.delta24hPct, 15),
+        gte(games.firstSeenAt, new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)),
+      );
+      break;
+    case "peaking":
+      strict.push(
+        eq(gameStatsLatest.pulseStage, "peaking"),
+        gte(gameStatsLatest.latestCcu, 200),
+        gte(gameStatsLatest.spikeScore, 1.4),
+      );
+      break;
+    case "declining":
+      strict.push(
+        eq(gameStatsLatest.pulseStage, "declining"),
+        gte(gameStatsLatest.latestCcu, 200),
+      );
+      break;
+    default:
+      strict.push(
+        gte(gameStatsLatest.latestCcu, 500),
+        gte(gameStatsLatest.spikeScore, 1.15),
+      );
+      break;
+  }
+  return strict;
+}
+
+export async function getPulse(
+  filter: PulseFilter,
+  sort: PulseSort,
+): Promise<PulsePayload> {
+  const baseSelect = () =>
+    db
+      .select({
+        universeId: gameStatsLatest.universeId,
+        name: games.name,
+        createdAt: games.createdAt,
+        firstSeenAt: games.firstSeenAt,
+        genre: games.robloxGenre,
+        iconUrl: games.iconUrl,
+        currentSort: games.currentSort,
+        currentSortRank: games.currentSortRank,
+        creatorName: creators.name,
+        creatorVerified: creators.hasVerifiedBadge,
+        computedAt: gameStatsLatest.computedAt,
+        latestCcu: gameStatsLatest.latestCcu,
+        trendScore: gameStatsLatest.trendScore,
+        velocity: gameStatsLatest.velocity,
+        spikeScore: gameStatsLatest.spikeScore,
+        pulseStage: gameStatsLatest.pulseStage,
+        spark: gameStatsLatest.spark,
+        delta24hPct: gameStatsLatest.delta24hPct,
+        velocityChange24hPct: gameStatsLatest.velocityChange24hPct,
+        annotation: gameStatsLatest.annotation,
+        velocityPctInCohort: cohortStats.velocityPctInCohort,
+        cohortBasis: cohortStats.cohortBasis,
+        cohortSize: cohortStats.cohortSize,
+      })
+      .from(gameStatsLatest)
+      .innerJoin(games, eq(games.universeId, gameStatsLatest.universeId))
+      .leftJoin(creators, eq(creators.creatorId, games.creatorId))
+      .leftJoin(
+        cohortStats,
+        eq(cohortStats.universeId, gameStatsLatest.universeId),
+      );
+
+  let rows = await baseSelect()
+    .where(and(...pulseFilters(filter)))
+    .orderBy(pulseOrder(sort))
+    .limit(PULSE_LIMIT);
+
+  // Fallback identical to tlw: quiet Roblox stretch / narrow gate → surface
+  // top games by current CCU rather than an empty page.
+  if (rows.length < 6 && filter === "all") {
+    rows = await baseSelect()
+      .orderBy(sql`${gameStatsLatest.latestCcu} desc nulls last`)
+      .limit(PULSE_LIMIT);
+  }
+
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const games24: PulseCardGame[] = rows.map((r) => ({
+    id: Number(r.universeId),
+    name: r.name,
+    creatorName: r.creatorName ?? "Unknown studio",
+    creatorVerified: r.creatorVerified ?? false,
+    genre: r.genre,
+    thumbnail: r.iconUrl,
+    ccu: r.latestCcu,
+    ccu24hAgo:
+      r.delta24hPct !== null && r.latestCcu > 0
+        ? Math.round(r.latestCcu / (1 + r.delta24hPct / 100))
+        : null,
+    velocity: r.velocity !== null ? Math.round(r.velocity) : 0,
+    spike: r.spikeScore,
+    trendScore: r.trendScore,
+    lifecycle: (r.pulseStage as PulseStage | null) ?? null,
+    reason: r.annotation ?? "",
+    spark: Array.isArray(r.spark) ? (r.spark as number[]) : [],
+    currentSort: r.currentSort,
+    currentSortRank: r.currentSortRank,
+    createdAtMs: r.createdAt ? r.createdAt.getTime() : null,
+    trackingDays: Math.max(
+      0,
+      Math.floor((now - r.firstSeenAt.getTime()) / dayMs),
+    ),
+    velocityPctInCohort: r.velocityPctInCohort,
+    cohortBasis: (r.cohortBasis as CohortBasis | null) ?? null,
+    cohortSize: r.cohortSize ?? 0,
+    velocityChange24hPct: r.velocityChange24hPct,
+    delta24hPct: r.delta24hPct,
+  }));
+
+  // Second read: singleton feed_health. Missing row → zero-filled payload +
+  // degradedMode=true so pulse's rail hides distribution/transitions until
+  // derive has run at least once (early boot).
+  const healthRow = await db
+    .select()
+    .from(feedHealth)
+    .where(eq(feedHealth.id, 1))
+    .limit(1);
+  const health = healthRow[0];
+
+  const trackedCcu = games24.reduce((s, g) => s + g.ccu, 0);
+  const movers = games24.filter(
+    (g) =>
+      g.lifecycle === "peaking" ||
+      (g.lifecycle === "growing" && (g.trendScore ?? -Infinity) >= 0.05),
+  ).length;
+  const new48h = games24.filter((g) => g.lifecycle === "new").length;
+
+  return {
+    games: games24,
+    hero: { trackedCcu, movers, new48h },
+    liveSince: health?.liveSince ? health.liveSince.getTime() : now,
+    rail: {
+      signal: null,
+      distribution: {
+        new: health?.distributionNew ?? 0,
+        growing: health?.distributionGrowing ?? 0,
+        peaking: health?.distributionPeaking ?? 0,
+        declining: health?.distributionDeclining ?? 0,
+      },
+      transitions6h: {
+        toNew: health?.transitionsToNew6h ?? 0,
+        toGrowing: health?.transitionsToGrowing6h ?? 0,
+        toPeaking: health?.transitionsToPeaking6h ?? 0,
+        toDeclining: health?.transitionsToDeclining6h ?? 0,
+      },
+    },
+    degradedMode: health?.degradedMode ?? true,
+  };
+}
+
+/* -------------------------------- search ---------------------------------- */
+
+// Search over games+creators by name substring. Rank prefix > substring so a
+// game named "Blox Fruits" surfaces before a game whose creator name contains
+// "blox". Capped at 8; auth-gated same as pulse.
+export async function getPulseSearch(q: string): Promise<PulseSearchResult[]> {
+  const trimmed = q.trim();
+  if (trimmed.length < 2) return [];
+  const pattern = `%${trimmed}%`;
+  const prefix = `${trimmed}%`;
+  const rank = sql<number>`case
+    when lower(${games.name}) like lower(${prefix}) then 3
+    when lower(${games.name}) like lower(${pattern}) then 2
+    else 1
+  end`;
+  const rows = await db
+    .select({
+      universeId: gameStatsLatest.universeId,
+      name: games.name,
+      genre: games.robloxGenre,
+      iconUrl: games.iconUrl,
+      creatorName: creators.name,
+      latestCcu: gameStatsLatest.latestCcu,
+      pulseStage: gameStatsLatest.pulseStage,
+    })
+    .from(games)
+    .innerJoin(
+      gameStatsLatest,
+      eq(gameStatsLatest.universeId, games.universeId),
+    )
+    .leftJoin(creators, eq(creators.creatorId, games.creatorId))
+    .where(or(ilike(games.name, pattern), ilike(creators.name, pattern)))
+    .orderBy(desc(rank), desc(gameStatsLatest.latestCcu))
+    .limit(8);
+
+  return rows.map((r) => ({
+    id: Number(r.universeId),
+    name: r.name,
+    creatorName: r.creatorName ?? "Unknown studio",
+    genre: r.genre,
+    thumbnail: r.iconUrl,
+    ccu: r.latestCcu,
+    lifecycle: (r.pulseStage as PulseStage | null) ?? null,
   }));
 }

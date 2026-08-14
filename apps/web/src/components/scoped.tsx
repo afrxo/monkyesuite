@@ -8,7 +8,7 @@ import { ApiError } from "../lib/api";
 
 export function Panel({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-10 text-center text-neutral-400">
+    <div className="rounded-lg border border-border-1 bg-surface-1/40 p-10 text-center text-text-3">
       {children}
     </div>
   );
@@ -19,7 +19,7 @@ export function ScopedError({ error }: { error: unknown }) {
   if (status === 401) {
     return (
       <Panel>
-        <p className="text-neutral-300">Sign in to see your projects.</p>
+        <p className="text-text-2">Sign in to see your projects.</p>
         <Link
           to="/sign-in"
           className="mt-2 inline-block rounded-md bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white"
@@ -32,7 +32,7 @@ export function ScopedError({ error }: { error: unknown }) {
   if (status === 403) {
     return (
       <Panel>
-        <p className="text-neutral-300">You’re not a member of this project.</p>
+        <p className="text-text-2">You’re not a member of this project.</p>
         <Link
           to="/projects"
           className="mt-2 inline-block text-sm text-indigo-400 hover:underline"
@@ -45,7 +45,7 @@ export function ScopedError({ error }: { error: unknown }) {
   if (status === 404) {
     return (
       <Panel>
-        <p className="text-neutral-300">Not found.</p>
+        <p className="text-text-2">Not found.</p>
         <Link
           to="/projects"
           className="mt-2 inline-block text-sm text-indigo-400 hover:underline"

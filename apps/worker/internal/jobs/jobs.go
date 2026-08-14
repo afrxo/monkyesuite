@@ -41,6 +41,9 @@ func Default(d Deps) sched.Registry {
 		EveryDay: []sched.Job{
 			&enrichJob{d: d, client: enrichClient(d.Client)},
 			&trendDriftJob{d},
+			// Backfills games.icon_url for tracked games discover missed —
+			// pulse reads icon_url directly, so a null icon is a blank card.
+			&iconBackfillJob{d},
 			// demand snapshots off-platform interest (YouTube + Trends) daily;
 			// skips itself if no YouTube client is configured.
 			&demandJob{d: d},

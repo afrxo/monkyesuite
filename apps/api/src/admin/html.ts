@@ -87,35 +87,131 @@ export const ASSETS = {
 } as const;
 
 export const STYLES = `
-:root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#d7dce5;--dim:#8b93a5;
---ok:#3ba55d;--warn:#d9a441;--bad:#e0533d;--accent:#5b8def}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:baseline}
-header h1{font-size:15px;margin:0;letter-spacing:.06em;text-transform:uppercase}
-header .who{color:var(--dim);font-size:12px;margin-left:auto}
-main{padding:20px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(440px,1fr))}
-section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px}
-section h2{font-size:12px;margin:0 0 4px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
-.note{color:var(--dim);font-size:11.5px;margin:0 0 10px}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th,td{text-align:left;padding:3px 8px 3px 0;border-bottom:1px solid var(--line);white-space:nowrap}
-th{color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase}
-td.num,th.num{text-align:right}
-.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.dim{color:var(--dim)}
-.big{font-size:22px;line-height:1.2}
-.spark{display:flex;align-items:flex-end;gap:1px;height:34px;margin:8px 0}
-.spark i{flex:1 1 auto;min-width:1px;background:var(--ok);display:block}
-.spark i.warn{background:var(--warn)}.spark i.bad{background:var(--bad)}
-form{display:inline-flex;gap:6px;align-items:center;margin:2px 0}
-input,select,button{font:inherit;font-size:12px;background:#0c0e13;color:var(--fg);
-border:1px solid var(--line);border-radius:4px;padding:4px 7px}
-button{cursor:pointer;border-color:var(--accent);color:#cfe0ff}
-button.danger{border-color:var(--bad);color:#ffd2c9}
-.err{color:var(--bad);white-space:pre-wrap;font-size:11.5px}
-.flash{margin:8px 0 0;font-size:12px}
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap');
+:root{
+  --surface-0:#0c0c0d;--surface-1:#161616;--surface-hover:rgba(255,255,255,0.03);
+  --border-1:rgba(255,255,255,0.06);--border-2:rgba(255,255,255,0.05);
+  --text-1:#fafaf9;--text-2:#ededeb;--text-3:#a8a29e;--text-4:#78716c;--text-5:#57534e;
+  --ok:#86efac;--warn:#fcd34d;--bad:#fca5a5;--accent:#93c5fd;
+  --font-sans:'Inter Tight',ui-sans-serif,system-ui,sans-serif;
+  --font-serif:'Instrument Serif',ui-serif,Georgia,serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  /* legacy aliases still referenced below */
+  --bg:var(--surface-0);--panel:var(--surface-1);--line:var(--border-1);
+  --fg:var(--text-2);--dim:var(--text-4);
+}
+*{box-sizing:border-box;min-width:0}
+html,body{scrollbar-width:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar{display:none}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--font-sans);
+  -webkit-font-smoothing:antialiased;font-feature-settings:"cv02","cv03","cv04","cv11";overflow-x:hidden}
+
+/* -------- Top bar -------- */
+header{padding:18px 32px;border-bottom:1px solid var(--line);display:flex;gap:16px;
+  align-items:baseline;max-width:1440px;margin:0 auto;width:100%}
+header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:-.01em;color:var(--text-1)}
+header h1 em{font-family:var(--font-serif);font-style:italic;font-weight:400;color:var(--text-4);
+  margin-left:8px;font-size:14px}
+header .who{color:var(--dim);font-size:12px;margin-left:auto;font-variant-numeric:tabular-nums}
+
+/* -------- Panel grid -------- */
+main{padding:24px 32px 48px;display:grid;gap:16px;
+  grid-template-columns:repeat(auto-fit,minmax(360px,1fr));
+  max-width:1440px;margin:0 auto;width:100%}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:18px 20px;min-width:0;display:flex;flex-direction:column;gap:10px;
+  overflow:hidden}
+section > *{min-width:0;max-width:100%}
+section h2{font-size:10px;margin:0;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-5);font-weight:600}
 .wide{grid-column:1/-1}
-.scroll{overflow-x:auto}
+
+/* -------- Text -------- */
+.note{color:var(--dim);font-size:12px;margin:0;line-height:1.5;font-family:var(--font-serif);
+  font-style:italic}
+.note code,.note strong{font-family:var(--font-sans);font-style:normal}
+.note code{background:var(--surface-hover);padding:1px 5px;border-radius:4px;font-size:11px;color:var(--text-3)}
+.note strong{color:var(--text-2);font-weight:600}
+.dim{color:var(--dim)}
+p{margin:0;line-height:1.5}
+p.dim{font-size:12px}
+
+/* -------- Big headline number -------- */
+.big{font-size:28px;line-height:1.1;font-weight:500;color:var(--text-1);
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:2px}
+.big.ok{color:var(--ok)}.big.warn{color:var(--warn)}.big.bad{color:var(--bad)}
+
+/* -------- Tables -------- */
+/* Wrap every table in a horizontal scroll shell so overflow stays IN the
+   panel (never on <body>). table-layout:auto lets long cells absorb space
+   without forcing the whole grid to grow. */
+table{width:100%;border-collapse:collapse;font-size:12.5px;
+  font-variant-numeric:tabular-nums;table-layout:auto}
+th,td{text-align:left;padding:8px 12px 8px 0;border-bottom:1px solid var(--line);
+  vertical-align:top;overflow-wrap:anywhere;word-break:break-word}
+th:last-child,td:last-child{padding-right:0}
+tr:last-child td{border-bottom:none}
+th{color:var(--text-5);font-weight:600;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;white-space:nowrap}
+td{color:var(--text-2)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.dim{color:var(--dim)}
+tr.warn td{background:rgba(252,211,77,0.03)}
+tr.bad td{background:rgba(252,165,165,0.04)}
+
+/* State colors on inline cells */
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+
+/* Error column: multi-line, capped so a stack trace never blows the panel
+   width. Falls into the .scroll shell in the worst case. */
+td.err,.err{color:var(--bad);white-space:pre-wrap;font-size:11.5px;
+  font-family:var(--font-mono);line-height:1.4;max-width:280px;
+  overflow-wrap:anywhere;word-break:break-word}
+
+/* -------- Sparkline -------- */
+.spark{display:flex;align-items:flex-end;gap:1px;height:36px;margin:6px 0}
+.spark i{flex:1 1 auto;min-width:1px;background:var(--ok);display:block;border-radius:1px}
+.spark i.warn{background:var(--warn)}.spark i.bad{background:var(--bad)}
+
+/* -------- Forms -------- */
+form{display:flex;gap:8px;align-items:center;margin:0;flex-wrap:wrap}
+input,select,button{font:inherit;font-size:12px;background:transparent;color:var(--fg);
+  border:1px solid var(--line);border-radius:6px;padding:6px 10px;line-height:1.2;
+  transition:border-color 140ms ease,background 140ms ease,color 140ms ease;
+  min-width:0;max-width:100%}
+input,select{color:var(--text-2)}
+input::placeholder{color:var(--text-5)}
+input:focus,select:focus{outline:none;border-color:var(--text-4);background:rgba(255,255,255,0.02)}
+button{cursor:pointer;background:var(--text-1);border-color:var(--text-1);color:var(--surface-0);
+  font-weight:500;white-space:nowrap}
+button:hover{background:#fff;border-color:#fff}
+button.danger{background:transparent;border-color:var(--bad);color:var(--bad);font-weight:500}
+button.danger:hover{background:rgba(252,165,165,0.08)}
+
+/* -------- Filter link row (jobs panel) -------- */
+p.dim a{color:var(--text-3);text-decoration:none;transition:color 140ms ease;padding:0 2px}
+p.dim a:hover{color:var(--text-1)}
+
+/* -------- Flash / status messages -------- */
+.flash{margin:4px 0 0;font-size:12px;color:var(--dim);
+  font-family:var(--font-serif);font-style:italic;min-height:1.2em}
+
+/* -------- Scroll shells -------- */
+/* Every wide table nests inside .scroll. Keeps overflow local to the panel,
+   never on the page. Scrollbar hidden — visual chrome kept minimal. */
+.scroll{overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  margin:0 -20px;padding:0 20px}
+.scroll::-webkit-scrollbar{display:none}
+.scroll table{min-width:100%}
+
+/* -------- Mobile -------- */
+@media (max-width:640px){
+  header{padding:14px 16px;flex-wrap:wrap}
+  header .who{width:100%;margin-left:0;margin-top:4px}
+  main{padding:16px;grid-template-columns:1fr;gap:12px}
+  section{padding:16px}
+  .big{font-size:24px}
+}
 `;
 
 // Companion script for htmx — served as a file, never inline (script-src 'self').
@@ -197,7 +293,7 @@ export function page(title: string, who: string, body: Raw): string {
 <title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="${ASSETS.css.href}"></head>
 <body>
-<header><h1>monkyesuite ${escapeHtml(title)}</h1>
+<header><h1>monkyesuite<em>${escapeHtml(title)}</em></h1>
 <span class="who">${escapeHtml(who)}</span></header>
 ${body.value}
 <script src="${ASSETS.htmx.href}" defer></script>
@@ -221,16 +317,27 @@ export function bare(title: string, body: Raw): string {
 <meta name="robots" content="noindex,nofollow">
 <title>${escapeHtml(title)}</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap');
 *{box-sizing:border-box}
-body{margin:0;display:grid;place-items:center;height:100vh;background:#0f1115;color:#d7dce5;
-font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-.card{background:#171a21;border:1px solid #262b36;border-radius:6px;padding:22px;min-width:300px}
-.card h1{font-size:14px;margin:0 0 12px;letter-spacing:.06em;text-transform:uppercase}
-.card form{display:flex;flex-direction:column;gap:8px;width:100%}
-input,button{font:inherit;font-size:12px;background:#0c0e13;color:#d7dce5;
-border:1px solid #262b36;border-radius:4px;padding:5px 8px}
-button{cursor:pointer;border-color:#5b8def;color:#cfe0ff}
-.err{color:#e0533d;font-size:12px;margin:4px 0 0}
+html,body{scrollbar-width:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar{display:none}
+body{margin:0;display:grid;place-items:center;min-height:100vh;background:#0c0c0d;color:#ededeb;
+  font:14px/1.5 'Inter Tight',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.card{background:#161616;border:1px solid rgba(255,255,255,0.06);border-radius:12px;
+  padding:28px 30px;min-width:320px;box-shadow:0 24px 48px -12px rgba(0,0,0,0.6)}
+.card h1{font-size:16px;margin:0 0 4px;color:#fafaf9;font-weight:600;letter-spacing:-.01em}
+.card h1 em{font-family:'Instrument Serif',ui-serif,Georgia,serif;font-style:italic;
+  font-weight:400;color:#78716c;font-size:15px;margin-left:6px}
+.card .sub{color:#a8a29e;font-size:12.5px;margin:0 0 18px;font-family:'Instrument Serif',serif;font-style:italic}
+.card form{display:flex;flex-direction:column;gap:10px;width:100%}
+label{color:#78716c;font-size:10px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;margin-bottom:-6px}
+input{font:inherit;font-size:13px;background:transparent;color:#ededeb;
+  border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px 10px;transition:border-color 140ms ease}
+input:focus{outline:none;border-color:#57534e;background:rgba(255,255,255,0.02)}
+button{font:inherit;font-size:13px;cursor:pointer;background:#fafaf9;border:1px solid #fafaf9;
+  color:#0c0c0d;border-radius:6px;padding:8px 10px;font-weight:500;margin-top:6px;transition:background 140ms ease}
+button:hover{background:#fff}
+.err{color:#fca5a5;font-size:12px;margin:6px 0 0;min-height:1em}
 </style></head><body>${body.value}</body></html>`;
 }
 

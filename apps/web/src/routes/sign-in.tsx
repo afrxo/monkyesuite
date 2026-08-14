@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
+import { Button } from "../components/ui/button";
 import { useSignIn } from "../lib/auth";
 
 export const Route = createFileRoute("/sign-in")({
@@ -21,7 +22,11 @@ function SignInPage() {
   };
 
   return (
-    <AuthShell title="Sign in" subtitle="Back to your build workspaces.">
+    <AuthShell
+      eyebrow="monkyesuite"
+      title="Sign in"
+      subtitle="Back to your build workspaces."
+    >
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <Field
           label="Username"
@@ -38,17 +43,15 @@ function SignInPage() {
           autoComplete="current-password"
         />
         {signIn.isError ? (
-          <p className="text-sm text-rose-400">{signIn.error.message}</p>
+          <p className="text-sm text-lifecycle-declining">
+            {signIn.error.message}
+          </p>
         ) : null}
-        <button
-          type="submit"
-          disabled={signIn.isPending}
-          className="mt-1 rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
-        >
+        <Button type="submit" disabled={signIn.isPending} className="mt-2 h-10">
           {signIn.isPending ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
       </form>
-      <p className="mt-4 text-sm text-neutral-500">
+      <p className="mt-6 text-xs text-text-5">
         Accounts are created by an administrator.
       </p>
     </AuthShell>
@@ -56,19 +59,30 @@ function SignInPage() {
 }
 
 export function AuthShell({
+  eyebrow,
   title,
   subtitle,
   children,
 }: {
+  eyebrow?: string;
   title: string;
   subtitle: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto max-w-sm">
-      <h1 className="text-xl font-bold text-neutral-100">{title}</h1>
-      <p className="mb-6 mt-1 text-sm text-neutral-500">{subtitle}</p>
-      {children}
+    <div className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-sm items-center">
+      <div className="w-full rounded-2xl border border-border-1 bg-surface-1 px-8 py-9 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.6)]">
+        {eyebrow ? (
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-5">
+            {eyebrow}
+          </div>
+        ) : null}
+        <h1 className="font-serif text-3xl italic leading-tight text-text-1">
+          {title}
+        </h1>
+        <p className="mb-7 mt-2 text-sm text-text-4">{subtitle}</p>
+        {children}
+      </div>
     </div>
   );
 }
@@ -87,14 +101,16 @@ export function Field({
   autoComplete?: string;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="text-neutral-400">{label}</span>
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-5">
+        {label}
+      </span>
       <input
         type={type}
         value={value}
         autoComplete={autoComplete}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-neutral-100 outline-none focus:border-neutral-600"
+        className="rounded-md border border-border-1 bg-transparent px-3 py-2 text-sm text-text-1 transition-colors outline-none focus:border-text-4 focus:bg-white/[0.02]"
       />
     </label>
   );

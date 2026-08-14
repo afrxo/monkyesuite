@@ -6,7 +6,13 @@
 // row rolls back with it — the log describes what happened, never what was
 // attempted-and-lost.
 
-import { enrichJobs, games, jobCommands, sessions, users } from "@monkyesuite/database";
+import {
+  enrichJobs,
+  games,
+  jobCommands,
+  sessions,
+  users,
+} from "@monkyesuite/database";
 import { and, eq, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -348,7 +354,10 @@ export async function addMemberAction(c: Context<AdminEnv>): Promise<Raw> {
   // weakened, no membership fabricated. Closed suite: there is no invite/token
   // step here — the target must already have an account (specs/06 §6.3).
   const result = await db.transaction(async (tx) => {
-    const r = await tx.execute<{ code: string; membership_id: string | null }>(sql`
+    const r = await tx.execute<{
+      code: string;
+      membership_id: string | null;
+    }>(sql`
       select code, membership_id from admin_add_member(
         ${projectId}::uuid, ${email}, ${role}, ${adminId})`);
     const code = r.rows[0]?.code ?? "error";
@@ -368,7 +377,8 @@ export async function addMemberAction(c: Context<AdminEnv>): Promise<Raw> {
   }
   if (result === "no_project") return bad("no such project");
   if (result === "no_user") return bad("no user with that username");
-  if (result === "already_member") return bad("already a member of that project");
+  if (result === "already_member")
+    return bad("already a member of that project");
   if (result !== "ok") return bad("add member failed");
   return ok(`added ${email} to the project`);
 }
@@ -384,7 +394,11 @@ export async function revokeUserAction(c: Context<AdminEnv>): Promise<Raw> {
 
   const result = await db.transaction(async (tx) => {
     const [target] = await tx
-      .select({ id: users.id, isAdmin: users.isAdmin, disabled: users.disabled })
+      .select({
+        id: users.id,
+        isAdmin: users.isAdmin,
+        disabled: users.disabled,
+      })
       .from(users)
       .where(eq(users.email, email))
       .limit(1);
@@ -401,7 +415,10 @@ export async function revokeUserAction(c: Context<AdminEnv>): Promise<Raw> {
       if ((row?.n ?? 0) <= 1) return "last_admin" as const;
     }
 
-    await tx.update(users).set({ disabled: true }).where(eq(users.id, target.id));
+    await tx
+      .update(users)
+      .set({ disabled: true })
+      .where(eq(users.id, target.id));
     // Kill the existing session NOW, not just future sign-in (specs/06 §6.6).
     await tx.delete(sessions).where(eq(sessions.userId, target.id));
     await writeAudit(tx, {

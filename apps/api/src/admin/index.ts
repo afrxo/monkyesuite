@@ -146,11 +146,14 @@ export function adminRoutes(): Hono<AdminEnv> {
     c.html(
       bare(
         "Sign in",
-        html`<div class="card"><h1>monkyesuite</h1>
+        html`<div class="card"><h1>monkyesuite<em>admin</em></h1>
+<p class="sub">Restricted control surface.</p>
 <form id="login-form">
-  <input name="email" type="text" placeholder="username" required>
-  <input name="password" type="password" placeholder="password" required>
-  <button type="submit">sign in</button>
+  <label for="login-email">Username</label>
+  <input id="login-email" name="email" type="text" autocomplete="username" required>
+  <label for="login-password">Password</label>
+  <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+  <button type="submit">Sign in</button>
   <p id="login-err" class="err"></p>
 </form></div>
 <script src="${ASSETS.authJs.href}" defer></script>`,

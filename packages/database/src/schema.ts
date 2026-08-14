@@ -58,6 +58,22 @@ export const lifecycleStage = pgEnum("lifecycle_stage", [
   "revived",
 ]);
 
+// Pulse-page lifecycle taxonomy. Distinct from the 7-stage classifier above,
+// which is a scientific/analytical grouping; pulse rolls those into a compact
+// 4-bucket feed model tuned for the "what's moving right now" surface.
+// Populated alongside `lifecycle` in the derive pass — mapping lives in derive,
+// not in a view, so the reasoning is explicit and cheap to change.
+export const pulseStage = pgEnum("pulse_stage", [
+  "new",
+  "growing",
+  "peaking",
+  "declining",
+]);
+
+// Cohort basis for cohort_stats. "genre" = grouped by robloxGenre; "global"
+// = whole-population percentile (used when a game has no genre bucket).
+export const cohortBasis = pgEnum("cohort_basis", ["genre", "global"]);
+
 export const lifecycleEventType = pgEnum("lifecycle_event_type", [
   "launch",
   "spike",
@@ -209,6 +225,12 @@ export const gameStats = pgTable(
     velocity: doublePrecision("velocity"), // short-window CCU rate of change
     spikeScore: doublePrecision("spike_score"), // deviation vs own baseline
     lifecycle: lifecycleStage("lifecycle"),
+    // pulse-feed signals (populated by derive; nullable during warm-up)
+    pulseStage: pulseStage("pulse_stage"),
+    spark: jsonb("spark"), // last-24h CCU sparkline as number[] (bounded ~24 pts)
+    delta24hPct: doublePrecision("delta_24h_pct"), // (ccu_now - ccu_24h_ago) / ccu_24h_ago
+    velocityChange24hPct: doublePrecision("velocity_change_24h_pct"),
+    annotation: text("annotation"), // human-readable "why it's here" kicker
     // growth
     ccuSlope7d: doublePrecision("ccu_slope_7d"),
     ccuSlope28d: doublePrecision("ccu_slope_28d"),
@@ -232,6 +254,86 @@ export const gameStats = pgTable(
     index("game_stats_trend_idx").on(t.trendScore),
   ],
 );
+
+/**
+ * game_stats_latest — denormalized "current row" per universe, upserted by the
+ * derive job at the end of every tick. Pulse reads exclusively from this table
+ * so the hot path is a single indexed scan; history stays in `game_stats`.
+ *
+ * Idempotent on universeId (PK). Any column here is a mirror of the most recent
+ * game_stats row's values, plus latestCcu carried forward from game_metrics so
+ * pulse doesn't need to join the raw table at request time.
+ */
+export const gameStatsLatest = pgTable(
+  "game_stats_latest",
+  {
+    universeId: bigint("universe_id", { mode: "number" })
+      .primaryKey()
+      .references(() => games.universeId, { onDelete: "cascade" }),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    latestCcu: integer("latest_ccu").notNull().default(0),
+    trendScore: doublePrecision("trend_score"),
+    velocity: doublePrecision("velocity"),
+    spikeScore: doublePrecision("spike_score"),
+    lifecycle: lifecycleStage("lifecycle"),
+    pulseStage: pulseStage("pulse_stage"),
+    spark: jsonb("spark"),
+    delta24hPct: doublePrecision("delta_24h_pct"),
+    velocityChange24hPct: doublePrecision("velocity_change_24h_pct"),
+    annotation: text("annotation"),
+    genrePercentile: doublePrecision("genre_percentile"),
+  },
+  (t) => [
+    // Pulse sort/filter indexes. Compound with latestCcu breaks ties + keeps
+    // planner honest for the (spike desc, ccu desc) combined sort in tlw.
+    index("gsl_spike_ccu_idx").on(t.spikeScore, t.latestCcu),
+    index("gsl_trend_idx").on(t.trendScore),
+    index("gsl_ccu_idx").on(t.latestCcu),
+    index("gsl_delta_idx").on(t.delta24hPct),
+    index("gsl_pulse_stage_idx").on(t.pulseStage),
+    index("gsl_computed_idx").on(t.computedAt),
+  ],
+);
+
+/**
+ * cohort_stats — per-game percentile within its cohort (genre or global). One
+ * row per universe, refreshed by derive alongside game_stats_latest.
+ */
+export const cohortStats = pgTable(
+  "cohort_stats",
+  {
+    universeId: bigint("universe_id", { mode: "number" })
+      .primaryKey()
+      .references(() => games.universeId, { onDelete: "cascade" }),
+    velocityPctInCohort: doublePrecision("velocity_pct_in_cohort"),
+    cohortBasis: cohortBasis("cohort_basis"),
+    cohortSize: integer("cohort_size").notNull().default(0),
+    computedAt: timestamp("computed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+/**
+ * feed_health — singleton snapshot of pulse-page aggregates, refreshed once
+ * per derive tick. A single-row table (enforced by `id = 1`) so pulse reads it
+ * with `select … from feed_health limit 1`, no aggregation at request time.
+ */
+export const feedHealth = pgTable("feed_health", {
+  id: integer("id").primaryKey().default(1), // singleton
+  distributionNew: integer("distribution_new").notNull().default(0),
+  distributionGrowing: integer("distribution_growing").notNull().default(0),
+  distributionPeaking: integer("distribution_peaking").notNull().default(0),
+  distributionDeclining: integer("distribution_declining").notNull().default(0),
+  transitionsToNew6h: integer("transitions_to_new_6h").notNull().default(0),
+  transitionsToGrowing6h: integer("transitions_to_growing_6h").notNull().default(0),
+  transitionsToPeaking6h: integer("transitions_to_peaking_6h").notNull().default(0),
+  transitionsToDeclining6h: integer("transitions_to_declining_6h").notNull().default(0),
+  firstTime10kToday: integer("first_time_10k_today").notNull().default(0),
+  newGames48h: integer("new_games_48h").notNull().default(0),
+  liveSince: timestamp("live_since", { withTimezone: true }).notNull().defaultNow(),
+  degradedMode: boolean("degraded_mode").notNull().default(false),
+});
 
 /**
  * lifecycle_events — discrete detected transitions (spike, cooldown, death…).

@@ -38,6 +38,10 @@ import type {
   ProjectDetail,
   ProjectGame,
   ProjectNote,
+  PulseFilter,
+  PulsePayload,
+  PulseSearchResult,
+  PulseSort,
   ReorderTaskInput,
   SortSnapshot,
   Tag,
@@ -127,6 +131,15 @@ export interface FeedParams {
 
 export const api = {
   feed: (p: FeedParams = {}) => get<Paged<FeedItem>>(`/feed${qs({ ...p })}`),
+
+  // Pulse: precomputed hot-path read. Returned payload is edge-cached by the
+  // API (Cache-Control s-maxage=30 SWR 120), so client-side memoization on
+  // top is unnecessary; TanStack Query's staleTime handles the rest.
+  pulse: (filter: PulseFilter = "all", sort: PulseSort = "spike") =>
+    get<PulsePayload>(`/pulse${qs({ filter, sort })}`),
+
+  pulseSearch: (q: string) => get<PulseSearchResult[]>(`/search${qs({ q })}`),
+
   game: (id: number) => get<GameDetail>(`/games/${id}`),
   metrics: (
     id: number,
