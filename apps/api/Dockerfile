@@ -20,7 +20,9 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 
 # Manifests first so this layer caches until a dependency actually changes.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# .npmrc is not optional: it carries the auto-install-peers setting the lockfile
+# was generated with, and --frozen-lockfile aborts on a mismatch.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY apps/api/package.json ./apps/api/
 COPY packages/core/package.json ./packages/core/
 COPY packages/database/package.json ./packages/database/
