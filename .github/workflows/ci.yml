@@ -1,0 +1,104 @@
+# CI — monkyesuite (specs/10-deployment.md §2)
+#
+# This workflow VERIFIES. It never deploys: Railway (monkye-api, monkye-worker)
+# and Cloudflare (monkye-web) each watch this repo through their own GitHub
+# integration and build themselves on push to main. Adding a deploy step here
+# would give us two deploy paths for one commit.
+#
+# No path filtering on any job. The three deployables share one database schema
+# and two TS packages, so "the Go worker didn't change" is not a reason to skip
+# the Go build — a schema migration can break it without touching apps/worker.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ts-check:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # No Postgres service: the DB-dependent suite (apps/api/src/tags.test.ts)
+      # skips itself when APP_DATABASE_URL/DATABASE_URL are unset, and
+      # admin.test.ts is pure logic against a URL that is never connected.
+      - run: pnpm test
+
+  go-check:
+    name: go build + vet + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: apps/worker/go.sum
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
+  db-drift:
+    name: schema drift
+    runs-on: ubuntu-latest
+    env:
+      # drizzle.config.ts throws without DATABASE_URL, but `generate` only diffs
+      # the snapshots in packages/database/drizzle/meta — it never connects. A
+      # dummy DSN is enough and keeps this job free of a service container.
+      DATABASE_URL: postgres://drift:drift@localhost:5432/drift
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - name: fail if a migration file changed
+        run: |
+          # --porcelain, not `git diff --exit-code`: a drifted schema produces a
+          # NEW migration file, which is untracked and invisible to git diff.
+          changed="$(git status --porcelain -- packages/database/drizzle)"
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            git diff -- packages/database/drizzle
+            echo "::error::schema.ts changed without a committed migration."
+            echo "Run 'pnpm db:generate' locally and commit packages/database/drizzle/**."
+            exit 1
+          fi
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    env:
+      # Permanent home of the biome OOM fix. Biome walks the whole workspace in
+      # one process; the default heap is not enough on a runner. Raise it here,
+      # not in a local shell profile, so CI and laptops agree.
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint

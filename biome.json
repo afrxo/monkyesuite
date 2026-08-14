@@ -7,9 +7,13 @@
       "!**/dist",
       "!**/drizzle",
       "!**/*.gen.ts",
+      "!apps/web/src/components/ui",
       "!**/*.css",
       "!packages/database/src/schema.ts",
-      "!apps/worker"
+      "!apps/worker",
+      "!**/.claude",
+      "!**/.tanstack",
+      "!**/.output"
     ]
   },
   "formatter": {

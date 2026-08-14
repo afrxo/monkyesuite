@@ -1,0 +1,41 @@
+# Both images build from the REPO ROOT context (the pnpm workspace needs the
+# root lockfile and packages/*), so this file is what keeps that context small.
+
+# deps — reinstalled inside the image, never copied in
+node_modules
+**/node_modules
+.pnpm-store
+
+# vcs / ci
+.git
+.github
+.gitignore
+
+# build output
+**/dist
+**/build
+**/.output
+**/.tanstack
+**/*.tsbuildinfo
+apps/worker/bin
+apps/worker/worker
+
+# apps/web is a Cloudflare deployable — it is never in a Railway image
+apps/web
+
+# agent scratch (.claude/worktrees holds a full second copy of this repo)
+.claude
+
+# secrets / local
+.env
+.env.*
+!.env.example
+
+# docs
+specs
+*.md
+
+# editor / os
+.DS_Store
+.idea
+.vscode

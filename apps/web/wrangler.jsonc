@@ -1,0 +1,14 @@
+{
+  // monkye-web — Cloudflare Workers (specs/10-deployment.md §6).
+  // SSR, not a static site: `main` is a virtual module the TanStack Start vite
+  // plugin emits, and the Cloudflare vite plugin wires dist/client as the
+  // Worker's static assets. Do not point this at a file path.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "monkye-web",
+  "compatibility_date": "2026-08-14",
+  // Start's server entry uses Node built-ins (async_hooks, stream) on the
+  // server side. Without this flag the Worker fails at module resolution.
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  "observability": { "enabled": true }
+}

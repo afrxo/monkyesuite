@@ -20,3 +20,6 @@ apps/worker/worker
 .DS_Store
 .idea/
 .vscode/
+
+# cloudflare
+apps/web/.wrangler/
