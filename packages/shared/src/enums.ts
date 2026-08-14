@@ -44,14 +44,6 @@ export type DemandKind = (typeof DEMAND_KINDS)[number];
 export const MEMBER_ROLES = ["owner", "member"] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 
-export const INVITE_STATUSES = [
-  "pending",
-  "accepted",
-  "revoked",
-  "expired",
-] as const;
-export type InviteStatus = (typeof INVITE_STATUSES)[number];
-
 export const PROJECT_STATUSES = [
   "active",
   "paused",

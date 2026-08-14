@@ -49,9 +49,13 @@ export const forbidden = (message = "Not permitted.") =>
 export const conflict = (message: string) => new HttpError("conflict", message);
 export const gone = (message: string) => new HttpError("gone", message);
 
-// Postgres unique-violation (e.g. duplicate project slug) → 409 conflict.
+// Postgres unique-violation (e.g. duplicate project slug, duplicate tag apply)
+// → 409 conflict. drizzle-orm wraps the real pg error in a DrizzleQueryError,
+// so the SQLSTATE lands on `.cause.code`, not the thrown error itself — check
+// both so this holds regardless of which layer's error object is passed in.
 export function isUniqueViolation(err: unknown): boolean {
-  return (err as { code?: string } | null)?.code === "23505";
+  const e = err as { code?: string; cause?: { code?: string } } | null;
+  return e?.code === "23505" || e?.cause?.code === "23505";
 }
 
 export function sendError(c: Context, err: HttpError) {

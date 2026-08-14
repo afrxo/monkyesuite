@@ -16,10 +16,11 @@ import { createRequire } from "node:module";
 import { Hono } from "hono";
 import { type AppEnv, resolveSession } from "../middleware.js";
 import {
-  createInviteAction,
+  addMemberAction,
   createUserAction,
   purgeAction,
   requeueAction,
+  revokeUserAction,
   runJobAction,
   trackAction,
   untrackAction,
@@ -56,6 +57,7 @@ import {
   limiterPanel,
   secretsPanel,
   snapshotPanel,
+  usersPanel,
 } from "./panels.js";
 
 /** Wrap a fragment so one failing panel degrades alone (§9.0). */
@@ -160,6 +162,7 @@ ${panel("panel-endpoints", "gated-endpoint failure rates", "/admin/panels/endpoi
 ${panel("panel-drift", "trend-drift (confirmation rule)", "/admin/panels/drift")}
 ${panel("panel-secrets", "operational secrets", "/admin/panels/secrets", { everySeconds: 120 })}
 <section><h2>identity</h2>${identityPanel()}</section>
+${panel("panel-users", "users", "/admin/panels/users")}
 <section><h2>tracked set</h2>${gamesPanel()}</section>
 ${panel("panel-jobs", "job run history", "/admin/panels/jobs", { wide: true })}
 ${panel("panel-audit", "audit log", "/admin/panels/audit", { wide: true, everySeconds: 60 })}
@@ -180,6 +183,7 @@ ${panel("panel-audit", "audit log", "/admin/panels/audit", { wide: true, everySe
   frag("/panels/drift", driftPanel);
   frag("/panels/secrets", secretsPanel);
   frag("/panels/audit", auditPanel);
+  frag("/panels/users", usersPanel);
 
   admin.get("/panels/jobs", async (c) => {
     const job = c.req.query("job");
@@ -228,7 +232,8 @@ ${panel("panel-audit", "audit log", "/admin/panels/audit", { wide: true, everySe
   action("/actions/games/track", trackAction);
   action("/actions/games/untrack", untrackAction);
   action("/actions/users/create", createUserAction);
-  action("/actions/invites/create", createInviteAction);
+  action("/actions/members/add", addMemberAction);
+  action("/actions/users/revoke", revokeUserAction);
 
   // Catch-all, registered last. A mounted sub-app's notFound() does NOT run —
   // an unmatched path falls through to the PARENT app's handler, which answers

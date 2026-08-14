@@ -1,7 +1,9 @@
-// Membership + invites (specs/06). Owner-only actions (invite, revoke, remove)
-// are gated in the UI by the caller's role AND enforced at the API — the UI gate
-// is convenience, not security. The two-collaborator cap surfaces as a 409 the
-// API returns, shown inline.
+// Membership (specs/06 §6.3). Owner-only actions (add, remove) are gated in
+// the UI by the caller's role AND enforced at the API — the UI gate is
+// convenience, not security. Adding a collaborator is a direct write against
+// an EXISTING account by email — no invite/token flow, since the suite is
+// closed and every user already has an account (admin-created). The
+// two-collaborator cap surfaces as a 409 the API returns, shown inline.
 
 import type { MemberRole } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,23 +24,12 @@ export function MembersPanel({
     queryKey: ["members", projectId],
     queryFn: () => api.members(projectId),
   });
-  const invites = useQuery({
-    queryKey: ["invites", projectId],
-    queryFn: () => api.invites(projectId),
-    enabled: isOwner,
-  });
-
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["members", projectId] });
-    qc.invalidateQueries({ queryKey: ["invites", projectId] });
   };
 
-  const invite = useMutation({
-    mutationFn: (email: string) => api.createInvite(projectId, email),
-    onSuccess: invalidate,
-  });
-  const revoke = useMutation({
-    mutationFn: (inviteId: string) => api.revokeInvite(inviteId),
+  const addMember = useMutation({
+    mutationFn: (email: string) => api.addMember(projectId, email),
     onSuccess: invalidate,
   });
   const remove = useMutation({
@@ -47,17 +38,15 @@ export function MembersPanel({
   });
 
   const [email, setEmail] = useState("");
-  const onInvite = (e: FormEvent) => {
+  const onAddMember = (e: FormEvent) => {
     e.preventDefault();
     if (email.trim())
-      invite.mutate(email.trim(), { onSuccess: () => setEmail("") });
+      addMember.mutate(email.trim(), { onSuccess: () => setEmail("") });
   };
 
   if (members.isError) return <ScopedError error={members.error} />;
   if (members.isPending)
     return <p className="text-sm text-neutral-600">Loading…</p>;
-
-  const pending = (invites.data ?? []).filter((i) => i.status === "pending");
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
@@ -99,51 +88,33 @@ export function MembersPanel({
       {isOwner ? (
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-400">
-            Invites
+            Add collaborator
           </h2>
-          <form onSubmit={onInvite} className="mb-3 flex items-center gap-2">
+          <form onSubmit={onAddMember} className="mb-3 flex items-center gap-2">
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="collaborator@email.com"
+              placeholder="existing user's email"
               className="flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
             />
             <button
               type="submit"
-              disabled={invite.isPending}
+              disabled={addMember.isPending}
               className="rounded-md bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
             >
-              Invite
+              Add
             </button>
           </form>
-          {invite.isError ? (
-            <p className="mb-2 text-sm text-rose-400">{invite.error.message}</p>
+          {addMember.isError ? (
+            <p className="mb-2 text-sm text-rose-400">
+              {addMember.error.message}
+            </p>
           ) : null}
-          <p className="mb-2 text-xs text-neutral-600">
-            Up to two collaborators per project.
+          <p className="text-xs text-neutral-600">
+            Up to two collaborators per project. The user must already have an
+            account — accounts are created by an administrator.
           </p>
-          {pending.length === 0 ? (
-            <p className="text-sm text-neutral-600">No pending invites.</p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {pending.map((i) => (
-                <li
-                  key={i.id}
-                  className="flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-sm"
-                >
-                  <span className="text-neutral-300">{i.email}</span>
-                  <button
-                    type="button"
-                    onClick={() => revoke.mutate(i.id)}
-                    className="text-xs text-neutral-600 hover:text-rose-300"
-                  >
-                    revoke
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </section>
       ) : null}
     </div>

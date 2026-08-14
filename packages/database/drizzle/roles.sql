@@ -78,7 +78,6 @@ grant select, insert on audit_log to monkye_app;
 grant select, insert, update, delete on
   projects,
   memberships,
-  invites,
   milestones,
   tasks,
   docs,
@@ -103,24 +102,22 @@ do $$ begin
     grant execute on function is_project_member(uuid) to monkye_app;
     grant execute on function is_project_owner(uuid) to monkye_app;
   end if;
-  -- Item→project resolvers + privileged invite-accept (created in functions.sql).
+  -- Item→project resolvers (created in functions.sql).
   if exists (select from pg_proc where proname = 'project_exists') then
     grant execute on function project_exists(uuid) to monkye_app;
-    grant execute on function project_of_invite(uuid) to monkye_app;
     grant execute on function project_of_task(uuid) to monkye_app;
     grant execute on function project_of_milestone(uuid) to monkye_app;
     grant execute on function project_of_doc(uuid) to monkye_app;
     grant execute on function project_of_note(uuid) to monkye_app;
-    grant execute on function accept_invite(text, text) to monkye_app;
     grant execute on function create_project(text, text, text, text) to monkye_app;
     grant execute on function remove_member(uuid, text) to monkye_app;
   end if;
-  -- Admin-panel invite creation (specs/09 §9.3a). Privileged insert with the
-  -- collaborator cap enforced inside the function, so /admin never needs the
-  -- invites policy weakened.
-  if exists (select from pg_proc where proname = 'admin_create_invite') then
-    grant execute on function
-      admin_create_invite(uuid, text, text, text, text, timestamptz) to monkye_app;
+  -- Adding a collaborator, owner and admin paths (specs/06 §6.3, specs/09
+  -- §9.3a). Privileged insert with the collaborator cap enforced inside the
+  -- function, so neither path ever needs a policy weakened.
+  if exists (select from pg_proc where proname = 'add_member_by_email') then
+    grant execute on function add_member_by_email(uuid, text, text) to monkye_app;
+    grant execute on function admin_add_member(uuid, text, text, text) to monkye_app;
   end if;
 end $$;
 

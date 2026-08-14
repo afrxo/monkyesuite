@@ -5,9 +5,10 @@ The concrete HTTP surface for the monkyesuite API (`apps/api`). **Contract only 
 The frontend (`apps/web`) talks to this API **only over HTTP** — it never reads Postgres. This document is the boundary both sides build against.
 
 > **Review flags** (decisions made here that deviate from or extend the specs):
-> 1. **Auth families are five, not two.** `07-api.md` splits handlers into *global* and *scoped*. That's the middleware split, but "scoped" collapses three distinct checks — *authenticated*, *member*, *owner* — plus the *author*-only check that game-notes and project-notes need. This doc names all five so each route's 401-vs-403 behaviour is unambiguous. See [Auth families](#auth-families).
+> 1. **Auth families are five, not two — and one of the five (`global`) is gone.** `07-api.md` splits handlers into *global* and *scoped*. That was the middleware split; this doc named the finer five — *global*, *authenticated*, *member*, *owner*, *author* — so 401-vs-403 was unambiguous per route. As of the **closed-suite amendment** (`06-identity-access.md §6.6`, `09-admin.md §9.1`), monkyesuite has no public surface: `global` is retired and every route that used to carry it now carries `authenticated`. Four families remain. See [Auth families](#auth-families).
 > 2. **Board move/reorder take named neighbours, not a raw `orderKey`.** `07-api.md §7.2` shows `{ status, orderKey }` as the write, but its closing line says compute `orderKey` server-side from the neighbours the client names. The request body therefore carries `beforeTaskId` / `afterTaskId`; the server computes and writes `orderKey`. See [Board](#board--tasks).
 > 3. **Path collision resolved.** `07-api.md §7.3` puts game-note mutations at `PATCH/DELETE /notes/:id`, but the project-scoped `notes` table needs item routes too. Both cannot own `/notes/:id`. Resolution: game-note items → `/game-notes/:id`, project-note items → `/project-notes/:id`. Collection routes are unaffected. Confirm before implementing. Both item routes are **flat** — `/game-notes/:id` and `/project-notes/:id` live at the API root, NOT nested under their `…/notes` collections — so the web track builds item URLs from the note id alone, without a `universeId` or `projectId` in the path.
+> 4. **Closed suite: no public sign-up, no owner-initiated invite-by-email.** Account creation is admin-only (`09-admin.md §9.3a`); owners add **existing** users to a project directly (`POST /projects/:id/members`, [Membership](#membership)), replacing the token/expiry invite flow. The `invites` table, `POST/GET /projects/:id/invites`, `DELETE /invites/:id`, and `POST /invites/:token/accept` are **removed**, not merely degraded — there is nothing left to accept, since an invitee already has an account by construction. See `06-identity-access.md §6.3`.
 
 ---
 
@@ -65,8 +66,7 @@ Non-2xx responses use:
 | `401` | `unauthenticated` | **no / invalid session** on a route that requires one |
 | `403` | `forbidden` | **authenticated but not permitted** — not a member, not the owner, or not the author |
 | `404` | `not_found` | resource id doesn't exist (or is hidden by RLS — see note) |
-| `409` | `conflict` | rule violation: collaborator cap reached, slug taken, subtask-of-subtask |
-| `410` | `gone` | accepting an **expired** invite — the invite moves to status `expired` and no membership is created (`06-identity-access.md §6.3`) |
+| `409` | `conflict` | rule violation: collaborator cap reached, already a member, slug taken, subtask-of-subtask |
 | `422` | `validation_error` | well-formed JSON that fails Zod — includes free-text tag rejection (`07-api.md §7.4`) |
 | `503` | `service_unavailable` | **DB unavailable** — returned with `retryAfter`, never a silent empty list (`07-api.md §7.5`) |
 
@@ -81,21 +81,24 @@ Non-2xx responses use:
 <a id="auth-families"></a>
 ## Auth families
 
+**The suite is closed (`06-identity-access.md §6.6`): nothing is public.** There is no `global` family anymore — every `/v1` route requires at least a valid, non-disabled session. The **three deliberate exceptions** that stay reachable signed-out live entirely outside this contract: the web sign-in page, the Better Auth sign-in endpoint it posts to (`/v1/auth/sign-in/email`, and the rest of `/v1/auth/*` needed to establish/read a session), and the static assets those two need to render. `/v1/auth/sign-up/email` is explicitly **not** one of them — see the review flag above. `/admin/login` is the equivalent exception for the admin surface (`09-admin.md §9.2`).
+
 | Family | Requirement | 401? | 403? | Enforcement |
 |---|---|---|---|---|
-| **global / optional** | none; a session, if present, may enrich the response | never | never | no `app.current_user_id`; reads global tables. `game_notes` read relies on the RLS `visibility='shared' OR author=…` policy, so it works signed-out (shared only) or signed-in (shared + own private). |
-| **authenticated** | a valid session (any user) | if absent | never | sets `app.current_user_id`; no membership needed. Used by vocabulary tagging writes, creating your own game note, accepting an invite, creating a project. |
-| **member** | authenticated **and** a `memberships` row for the project | if unauth | if not a member | API membership helper + RLS. Board, docs, project notes, project-game, invite listing. |
-| **owner** | authenticated **and** `memberships.role = 'owner'` for the project | if unauth | if not owner | mirrors the `projects_update` / `projects_delete` RLS policies. Destructive/config: update/delete project, remove member, create/revoke invite. |
+| **authenticated** | a valid, non-disabled session (any user) | if absent or disabled | never | sets `app.current_user_id`; no membership needed. Used by every read that used to be `global` (feed, discovery, game detail + sub-resources, tags, game-notes), plus vocabulary tagging writes, creating your own game note, creating a project. |
+| **member** | authenticated **and** a `memberships` row for the project | if unauth | if not a member | API membership helper + RLS. Board, docs, project notes, project-game, membership listing. |
+| **owner** | authenticated **and** `memberships.role = 'owner'` for the project | if unauth | if not owner | mirrors the `projects_update` / `projects_delete` RLS policies. Destructive/config: update/delete project, remove member, add an existing user as a member. |
 | **author** | authenticated **and** the row's `author_id` = caller | if unauth | if not author | game-note and (implicitly) private project-note item mutations. Mirrors the `game_notes_write` policy. |
 
-Every non-global route opens its request transaction with `SET LOCAL app.current_user_id = '<uuid>'` (`06-identity-access.md §6.4`). A missing setting fails closed.
+A **disabled** user (`users.disabled`, `06-identity-access.md §6.6`) fails the `authenticated` check the same as no session at all — the session resolver treats a disabled user's session as absent, so a revoked account gets `401` everywhere on its very next request, existing session included.
+
+Every route opens its request transaction with `SET LOCAL app.current_user_id = '<uuid>'` (`06-identity-access.md §6.4`). A missing setting fails closed.
 
 ---
 
-## Global endpoints (auth optional)
+## Endpoints backed by global tables (session required)
 
-Mirror the global table realm. Responses are cacheable (short-TTL in-process cache for hot reads like the feed, `07-api.md §7.5`).
+Read the shared, unscoped realm — but every route below now requires the `authenticated` family (§ above). Responses are cacheable (short-TTL in-process cache for hot reads like the feed, `07-api.md §7.5`); the cache key never varies by caller, since these reads don't depend on membership, only on being signed in at all.
 
 ### Feed & discovery
 
@@ -111,7 +114,7 @@ Query:
 | `sort` | `"spike" \| "trend" \| "ccu" \| "velocity" \| "newest"` | `"trend"` | |
 | `genre` | string | — | `games.robloxGenre` filter |
 
-Response: `Paged<FeedItem>` (see [FeedItem](#feeditem)). Auth: global/optional. Errors: `422` (bad query), `503`.
+Response: `Paged<FeedItem>` (see [FeedItem](#feeditem)). Auth: authenticated. Errors: `401`, `422` (bad query), `503`.
 
 #### `GET /discover/:surface` — intelligence surfaces
 One route per surface named in `08-web.md §8.2`; `:surface` ∈ `trend-drift | acceleration | spotlight | whitespace | patterns`. Each returns signal payloads derived in `specs/02` + `specs/03` (not raw tables), and **every flagged trend carries its carrier count and growth** so the confirmation rule is visible (`08-web.md §8.2`).
@@ -123,11 +126,11 @@ Common item fields (superset; per-surface payloads specified in specs 02/03):
   "computedAt": string,         // freshness
   /* surface-specific fields */ }
 ```
-Auth: global/optional. Errors: `404` (unknown surface), `503`.
+Auth: authenticated. Errors: `401`, `404` (unknown surface), `503`.
 
 ### Game detail
 
-Aggregate root + time-series/sub-resources for `08-web.md §8.3`. All global/optional; errors `404` (unknown `universeId`), `503`.
+Aggregate root + time-series/sub-resources for `08-web.md §8.3`. All authenticated; errors `401`, `404` (unknown `universeId`), `503`.
 
 | Method + path | Returns | Source table(s) |
 |---|---|---|
@@ -146,14 +149,14 @@ Aggregate root + time-series/sub-resources for `08-web.md §8.3`. All global/opt
 ### Tag vocabulary (read)
 
 #### `GET /tags`
-Controlled vocabulary (`03-tagging.md`). Query `?axis=<TagAxis>` optional. Response: `Tag[]`. Auth: global/optional. Errors: `503`.
+Controlled vocabulary (`03-tagging.md`). Query `?axis=<TagAxis>` optional. Response: `Tag[]`. Auth: authenticated. Errors: `401`, `503`.
 
-### Game notes (read — the shared/private split)
+### Game notes (read)
 
 #### `GET /games/:universeId/notes`
-Returns **shared** notes from any author **plus the caller's own private** notes. Never returns another user's private note (enforced by the `game_notes_select` RLS policy; the API sets `app.current_user_id` when a session is present, and leaves it unset otherwise so only `visibility='shared'` rows return).
+Returns **shared** notes from any author **plus the caller's own private** notes, unconditionally — every caller is authenticated now, so the signed-out "shared only" degradation from the old `global` family is gone. Never returns another user's private note (enforced by the `game_notes_select` RLS policy; the API always sets `app.current_user_id`).
 
-Response: `GameNote[]`, each with `isOwn: boolean` so the compose/edit UI can gate controls. Auth: **global/optional** — signed-out returns shared only; signed-in adds own-private. Errors: `404` (unknown game), `503`.
+Response: `GameNote[]`, each with `isOwn: boolean` so the compose/edit UI can gate controls. Auth: authenticated. Errors: `401`, `404` (unknown game), `503`.
 
 ---
 
@@ -173,20 +176,18 @@ Mirror the project-scoped realm plus author-gated content. Each opens a transact
 
 `status` ∈ `ProjectStatus`. `POST /projects` is the sole "creates its own membership" path (`06-identity-access.md §6.2`).
 
-### Membership & invites
+<a id="membership"></a>
+### Membership
 
-Collaborator cap: **two** collaborators per project (`06-identity-access.md §6.3`) — i.e. owner + up to two members.
+Collaborator cap: **two** collaborators per project (`06-identity-access.md §6.3`) — i.e. owner + up to two members. There is no invite/token/expiry flow (review flag 4): adding a collaborator is a direct, synchronous membership write against an **existing** account, since account creation is admin-only and every user already has one by construction.
 
 | Method + path | Body | Returns | Auth | Errors |
 |---|---|---|---|---|
 | `GET /projects/:id/members` | — | `Membership[]` | member | `401`, `403`, `503` |
+| `POST /projects/:id/members` | `{ email, role? }` | `Membership` (adds the **existing** user with that email) | owner | `401`, `403`, `404` (no user with that email), `409` (already a member / cap reached), `422`, `503` |
 | `DELETE /projects/:id/members/:userId` | — | `204` | owner | `401`, `403`, `404`, `503` |
-| `GET /projects/:id/invites` | — | `Invite[]` (token omitted) | member | `401`, `403`, `503` |
-| `POST /projects/:id/invites` | `{ email, role? }` | `Invite` (token delivered by email, not in body) | owner | `401`, `403`, `409` (cap reached), `422`, `503` |
-| `DELETE /invites/:id` | — | `204` (sets status `revoked`) | owner | `401`, `403`, `404`, `503` |
-| `POST /invites/:token/accept` | — | `Membership` | authenticated | `401`, `409` (cap reached / already a member), `410` (expired → status `expired`), `503` |
 
-`role` ∈ `MemberRole`. Expired-invite acceptance returns `410 Gone` (never creates a membership, `06-identity-access.md §6.3`).
+`role` ∈ `MemberRole`. `POST /projects/:id/members` writes the row through the same `add_member_by_email` SECURITY DEFINER function the admin panel's equivalent action calls (`09-admin.md §9.3a`) — the cap is enforced inside the function so neither path can route around it.
 
 <a id="board--tasks"></a>
 ### Board & tasks
@@ -365,17 +366,15 @@ GameNote { "id": string, "universeId": number, "authorId": string, "authorName":
 ```
 
 <a id="projectdetail"></a>
-### Project / ProjectDetail / Membership / Invite
+### Project / ProjectDetail / Membership
 ```
 Project    { "id": string, "name": string, "slug": string, "description": string | null,
              "status": ProjectStatus, "createdBy": string, "createdAt": string, "updatedAt": string }
 ProjectDetail = Project & { "membership": { "role": MemberRole }, "counts": { "members": number, "openTasks": number } }
 Membership { "id": string, "projectId": string, "userId": string, "role": MemberRole, "createdAt": string,
              "user": { "id": string, "name": string | null, "email": string } }
-Invite     { "id": string, "projectId": string, "email": string, "role": MemberRole,
-             "status": InviteStatus, "invitedBy": string, "createdAt": string, "expiresAt": string | null }
 ```
-`Invite.token` is never returned in a body — it travels only in the invite email. `Membership.user` (joined from `users`) is embedded so the workspace member list renders names/emails without a second call per member.
+`Membership.user` (joined from `users`) is embedded so the workspace member list renders names/emails without a second call per member. There is no `Invite` type — see review flag 4.
 
 <a id="board"></a>
 ### Board / Task / Milestone
@@ -423,6 +422,6 @@ Serialised as their literal strings (from `schema.ts`):
 ## Acceptance cross-check (`07-api.md`)
 
 - **No scoped endpoint returns data without a passing membership/authorship check** — every member/owner/author route sets `app.current_user_id` and the RLS policy is the backstop; unauth → `401`, wrong-relationship → `403`.
-- **Global endpoints never require auth** — the global table sits behind global/optional routes; game-note reads degrade to shared-only when signed out.
+- **No route is reachable signed-out** except the three deliberate exceptions (sign-in page, its Better Auth endpoint, their static assets) — every global-table read now requires `authenticated`; game-note reads no longer degrade to shared-only, since a caller is always signed in.
 - **Board move/reorder each write the minimal set of rows** — `move` writes `status`+`orderKey`, `reorder` writes `orderKey` only; `orderKey` computed server-side from named neighbours.
 - **Malformed payloads rejected before persistence** — `400` (shape) / `422` (Zod, incl. free-text tag axis) precede any write.

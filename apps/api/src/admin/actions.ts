@@ -6,8 +6,7 @@
 // row rolls back with it — the log describes what happened, never what was
 // attempted-and-lost.
 
-import { randomUUID } from "node:crypto";
-import { enrichJobs, games, jobCommands } from "@monkyesuite/database";
+import { enrichJobs, games, jobCommands, sessions, users } from "@monkyesuite/database";
 import { and, eq, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -16,8 +15,6 @@ import { db } from "../db.js";
 import { type AuditEntry, clientIp, writeAudit } from "./audit.js";
 import { type AdminEnv, assertAdmin, assertSameOrigin } from "./gate.js";
 import { html, type Raw } from "./html.js";
-
-const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Jobs an operator may trigger. `enrich-drain` is not one: it is spawned by
  * the enrich job itself, never scheduled. */
@@ -60,11 +57,20 @@ export const createUserSchema = z.object({
   name: z.string().trim().max(120).optional(),
   password: z.string().min(8).max(200),
 });
-export const createInviteSchema = z.object({
+export const addMemberSchema = z.object({
   projectId: z.string().uuid(),
   email: z.string().email(),
   role: z.enum(["owner", "member"]).default("member"),
 });
+export const revokeUserSchema = z
+  .object({
+    email: z.string().email(),
+    confirm: z.string(),
+  })
+  .refine((v) => v.confirm.trim() === v.email, {
+    message: "Confirmation must repeat the user's email.",
+    path: ["confirm"],
+  });
 
 const ok = (msg: string): Raw => html`<span class="ok">${msg}</span>`;
 const bad = (msg: string): Raw => html`<span class="bad">${msg}</span>`;
@@ -326,33 +332,30 @@ export async function createUserAction(c: Context<AdminEnv>): Promise<Raw> {
   return ok(`created ${email} (not an admin)`);
 }
 
-/* ----------------------------- create invite ------------------------------ */
+/* ----------------------------- add member ---------------------------------- */
 
-export async function createInviteAction(c: Context<AdminEnv>): Promise<Raw> {
+export async function addMemberAction(c: Context<AdminEnv>): Promise<Raw> {
   const adminId = assertAdmin(c);
   assertSameOrigin(c);
-  const parsed = await form(c, createInviteSchema);
+  const parsed = await form(c, addMemberSchema);
   if (!parsed.ok) return bad(parsed.message);
   const { projectId, email, role } = parsed.data;
 
-  // The privileged insert lives in admin_create_invite (functions.sql): the
-  // admin is not a member, so a plain insert resolves zero rows under the
-  // owner-gated policy. The function enforces the two-collaborator cap
-  // internally, so this path cannot route around the rule the owner path obeys
-  // — and no policy is weakened, no membership fabricated.
-  const token = randomUUID();
-  const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
-
+  // The privileged insert lives in admin_add_member (functions.sql): the admin
+  // confers no project membership, so it can't go through the owner-gated
+  // path. The function enforces the two-collaborator cap internally, so this
+  // path cannot route around the rule the owner path obeys — and no policy is
+  // weakened, no membership fabricated. Closed suite: there is no invite/token
+  // step here — the target must already have an account (specs/06 §6.3).
   const result = await db.transaction(async (tx) => {
-    const r = await tx.execute<{ code: string; invite_id: string | null }>(sql`
-      select code, invite_id from admin_create_invite(
-        ${projectId}::uuid, ${email}, ${role}, ${adminId}, ${token}, ${expiresAt.toISOString()}::timestamptz)`);
+    const r = await tx.execute<{ code: string; membership_id: string | null }>(sql`
+      select code, membership_id from admin_add_member(
+        ${projectId}::uuid, ${email}, ${role}, ${adminId})`);
     const code = r.rows[0]?.code ?? "error";
     await writeAudit(tx, {
       actorId: adminId,
-      action: "invite.create",
+      action: "member.add",
       target: email,
-      // The token is NEVER audited or rendered — it travels only in the email.
       detail: { projectId, email, role, result: code },
       outcome: code === "ok" ? "ok" : "error",
       ip: clientIp(c),
@@ -361,12 +364,63 @@ export async function createInviteAction(c: Context<AdminEnv>): Promise<Raw> {
   });
 
   if (result === "cap") {
-    return bad("collaborator cap reached (two per project) — invite refused");
+    return bad("collaborator cap reached (two per project)");
   }
   if (result === "no_project") return bad("no such project");
-  if (result !== "ok") return bad("invite failed");
-  // Delivery is the existing invite flow's job (email); the token is not shown.
-  return ok(`invite created for ${email}`);
+  if (result === "no_user") return bad("no user with that email");
+  if (result === "already_member") return bad("already a member of that project");
+  if (result !== "ok") return bad("add member failed");
+  return ok(`added ${email} to the project`);
+}
+
+/* ----------------------------- revoke user --------------------------------- */
+
+export async function revokeUserAction(c: Context<AdminEnv>): Promise<Raw> {
+  const adminId = assertAdmin(c);
+  assertSameOrigin(c);
+  const parsed = await form(c, revokeUserSchema);
+  if (!parsed.ok) return bad(parsed.message);
+  const { email } = parsed.data;
+
+  const result = await db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({ id: users.id, isAdmin: users.isAdmin, disabled: users.disabled })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+    if (!target) return "no_user" as const;
+    if (target.disabled) return "already_disabled" as const;
+
+    // The last admin cannot revoke themselves into a locked-out system — this
+    // is the one guard that must hold regardless of who clicks the button.
+    if (target.isAdmin) {
+      const [row] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(users)
+        .where(and(eq(users.isAdmin, true), eq(users.disabled, false)));
+      if ((row?.n ?? 0) <= 1) return "last_admin" as const;
+    }
+
+    await tx.update(users).set({ disabled: true }).where(eq(users.id, target.id));
+    // Kill the existing session NOW, not just future sign-in (specs/06 §6.6).
+    await tx.delete(sessions).where(eq(sessions.userId, target.id));
+    await writeAudit(tx, {
+      actorId: adminId,
+      action: "user.revoke",
+      target: email,
+      detail: { email, wasAdmin: target.isAdmin },
+      outcome: "ok",
+      ip: clientIp(c),
+    });
+    return "ok" as const;
+  });
+
+  if (result === "no_user") return bad("no user with that email");
+  if (result === "already_disabled") return bad("that user is already revoked");
+  if (result === "last_admin") {
+    return bad("cannot revoke the last admin — create another admin first");
+  }
+  return ok(`revoked ${email} — existing session killed, sign-in refused`);
 }
 
 /** Exported so the panel's job picker and the validator share one list. */

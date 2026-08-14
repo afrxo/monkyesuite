@@ -57,13 +57,8 @@ create or replace function project_exists(p uuid) returns boolean
     select exists (select 1 from projects where id = p);
   $$;
 
-create or replace function project_of_invite(p uuid) returns uuid
-  language sql stable security definer set search_path = public as $$
-    select project_id from invites where id = p;
-  $$;
-
--- Scoped board/workspace item → owning project. Same 404-vs-403 role as
--- project_of_invite: resolve the target row's project WITHOUT leaking content,
+-- Scoped board/workspace item → owning project. Same 404-vs-403 role as the
+-- other resolvers below: resolve the target row's project WITHOUT leaking content,
 -- so the API can membership-check before it fetches (and RLS collapses a
 -- non-member's read to empty). One per scoped item table with a flat item route.
 create or replace function project_of_task(p uuid) returns uuid
@@ -84,64 +79,6 @@ create or replace function project_of_doc(p uuid) returns uuid
 create or replace function project_of_note(p uuid) returns uuid
   language sql stable security definer set search_path = public as $$
     select project_id from notes where id = p;
-  $$;
-
--- ---------------------------------------------------------------------------
--- accept_invite — the one privileged mutation an unauthenticated-for-this-project
--- user must perform: they are not yet a member, so RLS on invites/memberships
--- would hide everything. SECURITY DEFINER runs the whole accept atomically and
--- returns a status code the API maps to HTTP:
---   ok             -> 200 (+ membership id)
---   expired        -> 410 (invite marked expired; no membership created)
---   already_member -> 409
---   cap            -> 409 (two-collaborator cap reached)
---   not_found      -> 404 (no pending invite for this token)
--- Collaborator cap = at most two role='member' memberships per project.
--- ---------------------------------------------------------------------------
-create or replace function accept_invite(p_token text, p_user_id text)
-  returns table (code text, membership_id uuid)
-  language plpgsql security definer set search_path = public as $$
-  declare
-    inv invites%rowtype;
-    member_count int;
-    new_id uuid;
-  begin
-    select * into inv from invites where token = p_token for update;
-
-    if not found or inv.status <> 'pending' then
-      return query select 'not_found'::text, null::uuid;
-      return;
-    end if;
-
-    if inv.expires_at is not null and inv.expires_at < now() then
-      update invites set status = 'expired' where id = inv.id;
-      return query select 'expired'::text, null::uuid;
-      return;
-    end if;
-
-    -- already a member of this project?
-    select id into new_id from memberships
-      where project_id = inv.project_id and user_id = p_user_id;
-    if found then
-      return query select 'already_member'::text, new_id;
-      return;
-    end if;
-
-    -- collaborator cap: at most two role='member' memberships.
-    select count(*) into member_count from memberships
-      where project_id = inv.project_id and role = 'member';
-    if inv.role = 'member' and member_count >= 2 then
-      return query select 'cap'::text, null::uuid;
-      return;
-    end if;
-
-    insert into memberships (project_id, user_id, role)
-      values (inv.project_id, p_user_id, inv.role)
-      returning id into new_id;
-    update invites set status = 'accepted' where id = inv.id;
-
-    return query select 'ok'::text, new_id;
-  end;
   $$;
 
 -- ---------------------------------------------------------------------------
@@ -187,49 +124,79 @@ create or replace function remove_member(p_project uuid, p_user text)
   $$;
 
 -- ---------------------------------------------------------------------------
--- Admin-panel invite creation (specs/09 §9.3a).
+-- Adding a collaborator (specs/06 §6.3, specs/09 §9.3a).
 --
--- The admin role is GLOBAL and deliberately confers no project membership, so
--- an admin inserting into `invites` resolves zero rows under the owner-gated
--- policy. The two obvious "fixes" are both wrong: weakening the invites policy
--- widens it for every caller, and fabricating a membership row for the admin
--- blurs the global/scoped realms. Instead the privileged insert lives here,
--- exactly like the other membership writes above — the policies stay untouched.
+-- The closed suite has no invite/token/expiry flow: every user already has an
+-- account (admin-created, specs/06 §6.1), so adding a collaborator is a direct,
+-- synchronous membership write against an EXISTING user looked up by email.
+-- Two entry points share the same shape and the same cap arithmetic:
+--   add_member_by_email — the owner-gated route (POST /projects/:id/members).
+--     The API's resolveProjectAccess(requireOwner) is the primary gate; this
+--     function performs the privileged insert (memberships has no insert
+--     policy at all — chicken/egg, same reason remove_member exists above).
+--   admin_add_member    — the admin-panel equivalent. An admin is GLOBAL and
+--     confers no project membership, so it cannot go through the owner path;
+--     this is the same insert, gated by requireAdmin at the API instead of
+--     ownership, with its own no_project code since a plain owner-gated call
+--     never needs to say "no such project" (the owner check already implies it
+--     exists) but an admin call can name any project id.
+-- Both enforce the two-collaborator cap INSIDE the function, not the caller,
+-- so neither path can be routed around the rule the other obeys.
 --
--- The collaborator cap is enforced INSIDE the function, not by the caller, so
--- the admin path cannot route around the rule the owner path obeys. The caller
--- (apps/api /admin) is the primary gate: requireAdmin runs before this is ever
--- called, and the token is generated caller-side to reuse the existing invite
--- flow verbatim.
-create or replace function admin_create_invite(
-    p_project uuid, p_email text, p_role text, p_invited_by text,
-    p_token text, p_expires_at timestamptz
-  ) returns table (code text, invite_id uuid)
+-- Return codes: ok | no_project (admin only) | no_user | already_member | cap.
+-- ---------------------------------------------------------------------------
+
+create or replace function add_member_by_email(
+    p_project uuid, p_email text, p_role text
+  ) returns table (code text, membership_id uuid)
   language plpgsql security definer set search_path = public as $$
   declare
-    seats_used int;
+    target_user text;
+    member_count int;
+    existing_id uuid;
     new_id uuid;
+  begin
+    select id into target_user from users where email = p_email;
+    if not found then
+      return query select 'no_user'::text, null::uuid;
+      return;
+    end if;
+
+    select id into existing_id from memberships
+      where project_id = p_project and user_id = target_user;
+    if found then
+      return query select 'already_member'::text, existing_id;
+      return;
+    end if;
+
+    select count(*) into member_count from memberships
+      where project_id = p_project and role = 'member';
+    if p_role = 'member' and member_count >= 2 then
+      return query select 'cap'::text, null::uuid;
+      return;
+    end if;
+
+    insert into memberships (project_id, user_id, role)
+      values (p_project, target_user, p_role::member_role)
+      returning id into new_id;
+
+    return query select 'ok'::text, new_id;
+  end;
+  $$;
+
+create or replace function admin_add_member(
+    p_project uuid, p_email text, p_role text, p_added_by text
+  ) returns table (code text, membership_id uuid)
+  language plpgsql security definer set search_path = public as $$
+  declare
+    r record;
   begin
     if not exists (select 1 from projects where id = p_project) then
       return query select 'no_project'::text, null::uuid;
       return;
     end if;
-
-    -- Same seat arithmetic as the owner-gated route: existing member
-    -- collaborators plus still-pending invites must stay under the cap of two.
-    select (select count(*) from memberships where project_id = p_project and role = 'member')
-         + (select count(*) from invites where project_id = p_project and status = 'pending')
-      into seats_used;
-    if p_role = 'member' and seats_used >= 2 then
-      return query select 'cap'::text, null::uuid;
-      return;
-    end if;
-
-    insert into invites (project_id, email, role, token, invited_by, expires_at)
-      values (p_project, p_email, p_role::member_role, p_token, p_invited_by, p_expires_at)
-      returning id into new_id;
-
-    return query select 'ok'::text, new_id;
+    select * into r from add_member_by_email(p_project, p_email, p_role);
+    return query select r.code, r.membership_id;
   end;
   $$;
 
@@ -238,10 +205,9 @@ create or replace function admin_create_invite(
 revoke all on function is_project_member(uuid) from public;
 revoke all on function is_project_owner(uuid) from public;
 revoke all on function project_exists(uuid) from public;
-revoke all on function project_of_invite(uuid) from public;
 revoke all on function project_of_task(uuid) from public;
 revoke all on function project_of_milestone(uuid) from public;
 revoke all on function project_of_doc(uuid) from public;
 revoke all on function project_of_note(uuid) from public;
-revoke all on function accept_invite(text, text) from public;
-revoke all on function admin_create_invite(uuid, text, text, text, text, timestamptz) from public;
+revoke all on function add_member_by_email(uuid, text, text) from public;
+revoke all on function admin_add_member(uuid, text, text, text) from public;

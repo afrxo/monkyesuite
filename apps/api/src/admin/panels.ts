@@ -14,6 +14,7 @@ import {
   enrichQueue,
   JOB_NAMES,
   jobRuns,
+  listUsers,
   recentCommands,
   type SnapshotTick,
   secretStatuses,
@@ -401,23 +402,58 @@ ${rows.map(
 
 export function identityPanel(flash?: Raw): Raw {
   return html`
-<p class="note">Accounts and invites go through the same Better Auth and invite
-flow the public paths use — a different caller, never a different mechanism. A
-user created here is never an admin: <code>is_admin</code> is set out of band by
-SQL, so the panel cannot escalate its own privilege.</p>
+<p class="note">The suite is closed: this panel is the ONLY way a new account
+comes into existence — there is no public sign-up. Account creation goes
+through the same Better Auth server API the (now-removed) public path used —
+a different caller, never a different mechanism. A user created here is never
+an admin: <code>is_admin</code> is set out of band by SQL, so the panel cannot
+escalate its own privilege. Adding a collaborator to a project is a direct
+write against an EXISTING account by email — there is no invite/token step
+(specs/06 §6.3).</p>
 <form hx-post="/admin/actions/users/create" hx-target="#panel-identity-flash">
   <input name="email" type="email" placeholder="email" required>
   <input name="name" placeholder="name">
   <input name="password" type="password" placeholder="temp password" required minlength="8">
   <button type="submit">create user</button>
 </form>
-<form hx-post="/admin/actions/invites/create" hx-target="#panel-identity-flash">
+<form hx-post="/admin/actions/members/add" hx-target="#panel-identity-flash">
   <input name="projectId" placeholder="project uuid" size="24" required>
-  <input name="email" type="email" placeholder="invitee email" required>
+  <input name="email" type="email" placeholder="existing user's email" required>
   <select name="role"><option value="member">member</option><option value="owner">owner</option></select>
-  <button type="submit">send invite</button>
+  <button type="submit">add to project</button>
 </form>
 <div id="panel-identity-flash" class="flash">${flash ?? null}</div>`;
+}
+
+/** 9.3a — revoke, with the last-admin guard enforced server-side (actions.ts),
+ * not just by this list. Typed confirmation (the target's own email) is
+ * required in the form body — hx-confirm is a convenience, not the control. */
+export async function usersPanel(): Promise<Raw> {
+  const rows = await listUsers();
+  return html`
+<table>
+<tr><th>email</th><th>name</th><th>admin</th><th>status</th><th>created</th><th></th></tr>
+${rows.map((u) => {
+  const statusCell = u.disabled
+    ? html`<span class="bad">revoked</span>`
+    : html`<span class="ok">active</span>`;
+  const action = u.disabled
+    ? html`<span class="dim">—</span>`
+    : html`<form hx-post="/admin/actions/users/revoke" hx-target="#panel-identity-flash"
+             hx-confirm="Revoke ${u.email}? Their session dies immediately and sign-in is refused.">
+        <input type="hidden" name="email" value="${u.email}">
+        <input name="confirm" placeholder="type email to confirm" size="20" required>
+        <button type="submit">revoke</button>
+      </form>`;
+  return html`<tr>
+  <td>${u.email}</td>
+  <td class="dim">${u.name ?? ""}</td>
+  <td>${u.isAdmin ? "yes" : ""}</td>
+  <td>${statusCell}</td>
+  <td class="dim">${stamp(u.createdAt)}</td>
+  <td>${action}</td></tr>`;
+})}
+</table>`;
 }
 
 export function gamesPanel(flash?: Raw): Raw {

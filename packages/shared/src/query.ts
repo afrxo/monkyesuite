@@ -75,14 +75,35 @@ export const patchProjectSchema = z
   .refine((v) => Object.keys(v).length > 0, "no fields to update");
 export type PatchProjectInput = z.infer<typeof patchProjectSchema>;
 
-export const createInviteSchema = z.object({
+// Add an EXISTING user to a project by email (no invite/token flow — the
+// closed suite has no one left to onboard-by-email, docs/api-contract.md
+// review flag 4).
+export const addMemberSchema = z.object({
   email: z.string().email().max(320),
   role: z.enum(MEMBER_ROLES).default("member"),
 });
-export type CreateInviteInput = z.infer<typeof createInviteSchema>;
+export type AddMemberInput = z.infer<typeof addMemberSchema>;
 
 // uuid path param for scoped item routes.
 export const uuidSchema = z.string().uuid();
+
+/* ------------------------------ tagging writes ----------------------------- */
+// 03-tagging.md §3.2: adding vocabulary is a separate, deliberate act from
+// applying it. `axis` restricted to the five-axis enum is the canonical
+// free-text rejection — anything else is 422, not a UI-only guard.
+
+export const createTagSchema = z.object({
+  axis: z.enum(TAG_AXES),
+  slug,
+  label: z.string().min(1).max(120),
+  description: z.string().max(2000).optional(),
+});
+export type CreateTagInput = z.infer<typeof createTagSchema>;
+
+// Applying a tag is dropdown-only from existing vocabulary — a tagId, never
+// free text (03-tagging.md §3.2).
+export const applyTagSchema = z.object({ tagId: uuidSchema });
+export type ApplyTagInput = z.infer<typeof applyTagSchema>;
 
 /* ------------------------------ board writes ------------------------------ */
 

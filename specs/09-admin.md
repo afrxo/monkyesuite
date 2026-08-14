@@ -2,7 +2,9 @@
 
 Context: `00-overview.md`, `06-identity-access.md`, `01-ingestion.md`, `02-signals.md`, `docs/api-contract.md`.
 
-New tables: `job_runs`, `job_commands`, `audit_log`. Additive columns: `users.is_admin`, `enrich_jobs.last_error` + `enrich_jobs.updated_at`. Reads `enrich_jobs`, `games`, `game_metrics`, `game_stats`, `game_tags`, `tags`, `users`, `invites`, `pg_stat_activity`.
+New tables: `job_runs`, `job_commands`, `audit_log`. Additive columns: `users.is_admin`, `users.disabled` (`06-identity-access.md §6.6`), `enrich_jobs.last_error` + `enrich_jobs.updated_at`. Reads `enrich_jobs`, `games`, `game_metrics`, `game_stats`, `game_tags`, `tags`, `users`, `pg_stat_activity`.
+
+**Closed-suite amendment.** monkyesuite has no public sign-up and no owner-initiated invite-by-email anymore (`06-identity-access.md §6.1, §6.3`) — admin account creation (§9.3a) is now the **sole** source of new accounts, and this doc's original invite-panel action is replaced by a direct add-existing-user-to-project action. This doc also gains the credential **revoke** half that create-only lacked (§9.3a, §9.4).
 
 The admin panel is the **operator's window into the worker**. The worker exposes no HTTP and never will — it is a tick loop, not a service. So every health number the panel shows is read **from Postgres**, and every action the panel takes is a **row the worker picks up on its next tick**. The database is the whole control plane.
 
@@ -74,22 +76,36 @@ It reuses `resolveSession` / `requireUser` (`middleware.ts`) for identity, then 
 
 The panel touches two categories that share a word and share nothing else. Keep them apart.
 
-### 9.3a — App identity (the panel may create these)
+### 9.3a — App identity (the panel may create and revoke these)
 
 Accounts and project access inside monkyesuite. **Reuse what exists — do not reinvent:**
 
-- **Create user** — call the **Better Auth server API** (`apps/api/src/auth.ts`) to create the account, exactly as the public sign-up path does. Same password hashing, same `accounts` row, same validation. The panel is a different *caller*, never a different *mechanism*. The created user is **never** an admin (§9.1).
-- **Send project invite** — reuse the **existing invite flow** (`06-identity-access.md §6.3`): a `pending` invite with a token and `expiresAt`, delivered by email, accepted into a `membership`. The **two-collaborator cap still applies** and is enforced by the same code the owner-gated route uses; the panel gets no exemption.
+- **Create user** — call the **Better Auth server API** (`apps/api/src/auth.ts`) to create the account, exactly as the (now-removed) public sign-up path did. Same password hashing, same `accounts` row, same validation. The panel is a different *caller*, never a different *mechanism*. The created user is **never** an admin (§9.1), and — since admin creation is now the **only** way an account comes into existence (`06-identity-access.md §6.1`) — it is also never pre-revoked; `disabled` defaults `false`.
+- **Add existing user to a project** — direct membership write, replacing the invite/token/expiry flow (`06-identity-access.md §6.3`: dropped in favour of this, since every user already has an account by construction and there is no one left to onboard-by-email). The **two-collaborator cap still applies** and is enforced inside the same privileged function the owner-gated route uses (below); the panel gets no exemption.
+- **Revoke user** — see below. New in this amendment; create-only was the gap.
 
-**RLS note (important).** `invites` is project-scoped: its insert policy requires the caller to be the project's owner. An admin is *not* a member, so a plain insert under `app.current_user_id` correctly resolves zero rows. Two ways not to fix this: weakening the invite policy, or fabricating a membership row for the admin. Both are wrong — they'd blur the realms.
+**RLS note (important), for the add-member action.** `memberships` has no insert policy at all (chicken/egg: the first owner row can't satisfy an ownerOf check), so membership writes already go through SECURITY DEFINER functions for every caller, admin included — there's no owner-only policy to route around here the way the old invites-insert policy required. Two ways not to build this anyway: fabricating a membership row *for the admin*, or letting the admin bypass the two-collaborator cap. Both are wrong — they'd blur the realms and let the panel exceed a rule the owner path obeys.
 
-Resolution: a **SECURITY DEFINER function in `packages/database/functions.sql`** (alongside `is_project_member` / `is_project_owner`):
+Resolution: a **SECURITY DEFINER function in `packages/database/functions.sql`**, alongside `create_project` / `remove_member`:
 
 ```sql
-admin_create_invite(project_id uuid, email text, role text, invited_by text) returns uuid
+admin_add_member(project_id uuid, email text, role text, added_by text) returns table (code text, membership_id uuid)
 ```
 
-It runs as the table owner, so it bypasses the policy, and it **enforces the collaborator cap internally** (raising on breach) so the cap cannot be routed around. The API calls it **only after `requireAdmin`**, and the surrounding TS reuses the shared invite-creation logic (token generation, expiry, email) from the owner-gated path. The RLS policies stay exactly as they are.
+It looks up the user by email, **enforces the collaborator cap internally** (never inserts on breach) exactly like the owner-gated `add_member_by_email` it mirrors, and returns a code (`ok | no_project | no_user | already_member | cap`) the API maps to HTTP. The API calls it **only after `requireAdmin`**. No RLS policy is weakened and no membership is fabricated for the admin.
+
+#### Revoke user (new)
+
+**A revoked user is dead across the whole suite immediately**, not merely blocked from a future sign-in (`06-identity-access.md §6.6`). The action:
+
+1. Sets `users.disabled = true` for the target.
+2. **Deletes every row in `sessions` for that user id, in the same transaction** — this is what kills an already-open tab's session on its very next request, not just future sign-in attempts.
+3. Writes the `user.revoke` audit row, in that same transaction (§9.5).
+
+Guardrails, all enforced server-side (not just hidden in the UI):
+- **The last admin cannot revoke themselves** (or be revoked) — the action reads `count(*) from users where is_admin and not disabled` first; if the target is an admin and the count is 1, the action refuses and no row changes. Locking out the only operator who can create or revoke anyone is worse than the thing revocation defends against.
+- Revoking is **disable, never delete** (§ intro): `game_notes.author_id`, `audit_log.actor_id`, `tasks.created_by` / `assignee_id`, and every other reference to the user survive untouched — a delete would either orphan those rows or cascade destructively, neither of which this action is for.
+- There is deliberately no **un-revoke** in this amendment's scope, no **edit user**, and no **password reset** — the credential lifecycle here is exactly create + revoke, nothing broader.
 
 ### 9.3b — Operational secrets (the panel never touches the values)
 
@@ -190,7 +206,7 @@ Sourced entirely from `job_runs` (§9.6).
 
 Every action is an `hx-post`, re-asserts `requireAdmin` inside the handler (belt and braces over the mount middleware), validates its body with **Zod** (`07-api.md §7.4`), **writes an `audit_log` row in the same transaction as its effect**, and swaps back the affected panel fragment.
 
-Two destructive actions (**purge**, **remove game**) require a typed confirmation in the form body — the string must match the target identifier. htmx `hx-confirm` is a convenience, not the control.
+Three destructive actions (**purge**, **remove game**, **revoke user**) require a typed confirmation in the form body — the string must match the target identifier (for revoke, the user's email). htmx `hx-confirm` is a convenience, not the control.
 
 | Action | Route | Effect | Audit action |
 |---|---|---|---|
@@ -200,7 +216,8 @@ Two destructive actions (**purge**, **remove game**) require a typed confirmatio
 | **Add game to tracked set** | `POST /admin/actions/games/track` | upsert `games` (manual seed, `ON CONFLICT (universe_id) DO NOTHING`), mark tracked | `game.track` |
 | **Remove game from tracked set** | `POST /admin/actions/games/untrack` | clear the tracked flag — **never deletes `game_metrics`** | `game.untrack` |
 | **Create user** | `POST /admin/actions/users/create` | Better Auth server API (§9.3a) | `user.create` |
-| **Send invite** | `POST /admin/actions/invites/create` | `admin_create_invite(...)` + existing invite email (§9.3a) | `invite.create` |
+| **Add member** | `POST /admin/actions/members/add` | `admin_add_member(...)` (§9.3a) | `member.add` |
+| **Revoke user** | `POST /admin/actions/users/revoke` | `users.disabled = true` + delete the user's `sessions` rows, one tx (§9.3a) | `user.revoke` |
 
 **Notes that are rules, not preferences:**
 
@@ -306,8 +323,11 @@ Index `(created_at desc)` and `(actor_id, created_at desc)`.
 - A signed-in **project owner** who is not an admin gets a bare `403` at `/admin` — no panel, no hint, and an `admin.denied` audit row.
 - A signed-out visitor gets `/admin/login` (full page) or `HX-Redirect` (fragment), never a panel fragment.
 - No response body, log line, or `audit_log.detail` under `/admin` contains a secret value; the credentials panel renders booleans and timestamps only.
-- Creating a user or invite from the panel goes through Better Auth and the existing invite flow; the two-collaborator cap still rejects the third.
-- No RLS policy is weakened and no membership row is fabricated to make the admin invite action work.
+- Creating a user goes through the Better Auth server API; adding an existing user to a project goes through `admin_add_member`; the two-collaborator cap still rejects the third either way.
+- No RLS policy is weakened and no membership row is fabricated for the admin to make the add-member action work.
+- Revoking a user sets `disabled = true` and deletes their `sessions` rows in one transaction; their next `/v1` or `/admin` request is `401`/denied, and a fresh sign-in is refused.
+- The last remaining admin cannot revoke themselves — the action refuses and writes no row change.
+- Revoking a user deletes nothing else: their authored `game_notes`, `audit_log` rows, and `created_by`/`assignee_id` references on tasks survive untouched.
 - Snapshot freshness shows real-vs-carried per tick and turns red when the carry-forward rate spikes against its own trailing baseline.
 - The limiter panel distinguishes enrich-tier skips (expected under drain) from critical-tier skips (a bug), verifying the two-tier reservation holds under load.
 - Every write action produces exactly one `audit_log` row in the same transaction as its effect; a rolled-back action leaves none.

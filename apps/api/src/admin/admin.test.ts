@@ -1,6 +1,6 @@
 // Unit coverage for the /admin logic that must not be got wrong by inspection:
 // output escaping, the carry-forward banding, and the action validators.
-// Behaviour that needs a database (the gate, audit atomicity, the invite cap)
+// Behaviour that needs a database (the gate, audit atomicity, the collaborator cap)
 // is verified end-to-end against Postgres — see the acceptance run.
 
 import { beforeAll, describe, expect, it } from "vitest";

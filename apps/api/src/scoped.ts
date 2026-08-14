@@ -1,21 +1,13 @@
-// Scoped routes (auth required) — projects, membership, invites. Every handler
+// Scoped routes (auth required) — projects, membership. Every handler
 // resolves membership through resolveProjectAccess BEFORE touching data, inside
 // a withUser transaction that sets app.current_user_id for the RLS backstop.
-// Membership WRITES (create project's owner row, remove member, accept invite)
+// Membership WRITES (create project's owner row, remove member, add a member)
 // go through SECURITY DEFINER functions — see functions.sql / access.ts.
 
-import { randomUUID } from "node:crypto";
+import { memberships, projects, tasks, users } from "@monkyesuite/database";
 import {
-  invites,
-  memberships,
-  projects,
-  tasks,
-  users,
-} from "@monkyesuite/database";
-import {
-  createInviteSchema,
+  addMemberSchema,
   createProjectSchema,
-  type Invite,
   type Membership,
   type Project,
   type ProjectDetail,
@@ -24,10 +16,9 @@ import {
 } from "@monkyesuite/shared";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { projectOfInvite, resolveProjectAccess } from "./access.js";
+import { resolveProjectAccess } from "./access.js";
 import {
   conflict,
-  gone,
   isUniqueViolation,
   notFound,
   validationError,
@@ -35,9 +26,6 @@ import {
 import { type AppEnv, requireUser } from "./middleware.js";
 import { isoReq } from "./serialize.js";
 import { type Tx, withUser } from "./tx.js";
-
-const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const COLLABORATOR_CAP = 2; // at most two role='member' collaborators per project
 
 const mapProject = (p: typeof projects.$inferSelect): Project => ({
   id: p.id,
@@ -179,31 +167,54 @@ export function scopedRoutes(): Hono<AppEnv> {
     const id = uuidSchema.parse(c.req.param("id"));
     const rows = await withUser(userId, async (tx): Promise<Membership[]> => {
       await resolveProjectAccess(tx, id, userId);
-      const list = await tx
-        .select({
-          id: memberships.id,
-          projectId: memberships.projectId,
-          userId: memberships.userId,
-          role: memberships.role,
-          createdAt: memberships.createdAt,
-          uId: users.id,
-          uName: users.name,
-          uEmail: users.email,
-        })
-        .from(memberships)
-        .innerJoin(users, eq(users.id, memberships.userId))
-        .where(eq(memberships.projectId, id))
-        .orderBy(desc(memberships.role));
-      return list.map((m) => ({
-        id: m.id,
-        projectId: m.projectId,
-        userId: m.userId,
-        role: m.role,
-        createdAt: isoReq(m.createdAt),
-        user: { id: m.uId, name: m.uName, email: m.uEmail },
-      }));
+      return listMembers(tx, id);
     });
     return c.json(rows);
+  });
+
+  // Add an EXISTING user to a project by email — the closed suite's
+  // replacement for the invite/token/expiry flow (specs/06 §6.3): everyone
+  // already has an account, so this is a direct, synchronous write, not an
+  // async accept step. add_member_by_email enforces the two-collaborator cap
+  // internally so this path can't route around it (functions.sql).
+  r.post("/projects/:id/members", async (c) => {
+    const userId = requireUser(c);
+    const id = uuidSchema.parse(c.req.param("id"));
+    const body = addMemberSchema.safeParse(
+      await c.req.json().catch(() => ({})),
+    );
+    if (!body.success) throw validationError("Invalid member.");
+    const membership = await withUser(
+      userId,
+      async (tx): Promise<Membership> => {
+        await resolveProjectAccess(tx, id, userId, { requireOwner: true });
+        const res = await tx.execute<{
+          code: string;
+          membership_id: string | null;
+        }>(
+          sql`select code, membership_id from add_member_by_email(${id}, ${body.data.email}, ${body.data.role})`,
+        );
+        const row = res.rows[0];
+        switch (row?.code) {
+          case "no_user":
+            throw notFound("No user with that email.");
+          case "already_member":
+            throw conflict("Already a member of this project.");
+          case "cap":
+            throw conflict("Collaborator cap reached (two per project).");
+          case "ok":
+            break;
+          default:
+            throw notFound("No such project.");
+        }
+        const membershipId = row.membership_id;
+        if (!membershipId) throw notFound("Membership not found.");
+        const [m] = await listMembers(tx, id, membershipId);
+        if (!m) throw notFound("Membership not found.");
+        return m;
+      },
+    );
+    return c.json(membership, 201);
   });
 
   r.delete("/projects/:id/members/:userId", async (c) => {
@@ -220,138 +231,41 @@ export function scopedRoutes(): Hono<AppEnv> {
     return c.body(null, 204);
   });
 
-  /* --------------------------- invites ---------------------------------- */
-
-  const mapInvite = (i: typeof invites.$inferSelect): Invite => ({
-    id: i.id,
-    projectId: i.projectId,
-    email: i.email,
-    role: i.role,
-    status: i.status,
-    invitedBy: i.invitedBy,
-    createdAt: isoReq(i.createdAt),
-    expiresAt: i.expiresAt ? isoReq(i.expiresAt) : null,
-  });
-
-  r.get("/projects/:id/invites", async (c) => {
-    const userId = requireUser(c);
-    const id = uuidSchema.parse(c.req.param("id"));
-    const rows = await withUser(userId, async (tx) => {
-      await resolveProjectAccess(tx, id, userId);
-      return tx
-        .select()
-        .from(invites)
-        .where(eq(invites.projectId, id))
-        .orderBy(desc(invites.createdAt));
-    });
-    return c.json(rows.map(mapInvite)); // token omitted by mapInvite
-  });
-
-  r.post("/projects/:id/invites", async (c) => {
-    const userId = requireUser(c);
-    const id = uuidSchema.parse(c.req.param("id"));
-    const body = createInviteSchema.safeParse(
-      await c.req.json().catch(() => ({})),
-    );
-    if (!body.success) throw validationError("Invalid invite.");
-    const invite = await withUser(userId, async (tx): Promise<Invite> => {
-      await resolveProjectAccess(tx, id, userId, { requireOwner: true });
-      // Cap: existing member collaborators + still-pending invites must stay < 2.
-      const seats = await tx.execute<{ used: number }>(sql`
-        select (select count(*) from memberships where project_id = ${id} and role = 'member')
-             + (select count(*) from invites where project_id = ${id} and status = 'pending')
-             as used`);
-      if (Number(seats.rows[0]?.used ?? 0) >= COLLABORATOR_CAP) {
-        throw conflict("Collaborator cap reached (two per project).");
-      }
-      const [row] = await tx
-        .insert(invites)
-        .values({
-          projectId: id,
-          email: body.data.email,
-          role: body.data.role,
-          token: randomUUID(),
-          invitedBy: userId,
-          expiresAt: new Date(Date.now() + INVITE_TTL_MS),
-        })
-        .returning();
-      if (!row) throw notFound("Invite creation failed.");
-      return mapInvite(row);
-    });
-    return c.json(invite, 201);
-  });
-
-  r.delete("/invites/:id", async (c) => {
-    const userId = requireUser(c);
-    const id = uuidSchema.parse(c.req.param("id"));
-    const projectId = await projectOfInvite(id);
-    if (!projectId) throw notFound("No such invite.");
-    await withUser(userId, async (tx) => {
-      await resolveProjectAccess(tx, projectId, userId, { requireOwner: true });
-      await tx
-        .update(invites)
-        .set({ status: "revoked" })
-        .where(eq(invites.id, id));
-    });
-    return c.body(null, 204);
-  });
-
-  r.post("/invites/:token/accept", async (c) => {
-    const userId = requireUser(c);
-    const token = c.req.param("token");
-    // accept_invite is SECURITY DEFINER (the caller isn't a member yet, so RLS
-    // would hide the invite). It runs the whole accept atomically.
-    const res = await withUser(userId, (tx) =>
-      tx.execute<{ code: string; membership_id: string | null }>(
-        sql`select * from accept_invite(${token}, ${userId})`,
-      ),
-    );
-    const row = res.rows[0];
-    switch (row?.code) {
-      case "expired":
-        throw gone("This invite has expired.");
-      case "already_member":
-        throw conflict("You are already a member of this project.");
-      case "cap":
-        throw conflict("Collaborator cap reached (two per project).");
-      case "ok":
-        break;
-      default:
-        throw notFound("No such invite.");
-    }
-    const membershipId = row.membership_id;
-    if (!membershipId) throw notFound("Membership not found.");
-    const membership = await withUser(
-      userId,
-      async (tx): Promise<Membership> => {
-        const [m] = await tx
-          .select({
-            id: memberships.id,
-            projectId: memberships.projectId,
-            userId: memberships.userId,
-            role: memberships.role,
-            createdAt: memberships.createdAt,
-            uId: users.id,
-            uName: users.name,
-            uEmail: users.email,
-          })
-          .from(memberships)
-          .innerJoin(users, eq(users.id, memberships.userId))
-          .where(eq(memberships.id, membershipId))
-          .limit(1);
-        if (!m) throw notFound("Membership not found.");
-        return {
-          id: m.id,
-          projectId: m.projectId,
-          userId: m.userId,
-          role: m.role,
-          createdAt: isoReq(m.createdAt),
-          user: { id: m.uId, name: m.uName, email: m.uEmail },
-        };
-      },
-    );
-    return c.json(membership, 201);
-  });
-
   return r;
+}
+
+// List a project's memberships, optionally filtered to one membership id
+// (reused by POST /projects/:id/members to re-read what it just wrote).
+async function listMembers(
+  tx: Tx,
+  projectId: string,
+  onlyId?: string,
+): Promise<Membership[]> {
+  const rows = await tx
+    .select({
+      id: memberships.id,
+      projectId: memberships.projectId,
+      userId: memberships.userId,
+      role: memberships.role,
+      createdAt: memberships.createdAt,
+      uId: users.id,
+      uName: users.name,
+      uEmail: users.email,
+    })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(
+      onlyId
+        ? and(eq(memberships.projectId, projectId), eq(memberships.id, onlyId))
+        : eq(memberships.projectId, projectId),
+    )
+    .orderBy(desc(memberships.role));
+  return rows.map((m) => ({
+    id: m.id,
+    projectId: m.projectId,
+    userId: m.userId,
+    role: m.role,
+    createdAt: isoReq(m.createdAt),
+    user: { id: m.uId, name: m.uName, email: m.uEmail },
+  }));
 }

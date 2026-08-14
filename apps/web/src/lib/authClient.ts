@@ -51,18 +51,8 @@ export const authClient = {
     });
     return r.user;
   },
-  async signUp(
-    name: string,
-    email: string,
-    password: string,
-  ): Promise<SessionUser> {
-    const r = await authFetch<{ user: SessionUser }>("/sign-up/email", {
-      name,
-      email,
-      password,
-    });
-    return r.user;
-  },
+  // No signUp: the suite is closed, accounts are admin-only (specs/06 §6.1),
+  // and /v1/auth/sign-up/email is disabled at the route.
   async signOut(): Promise<void> {
     await authFetch("/sign-out", {});
   },

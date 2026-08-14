@@ -73,16 +73,6 @@ export async function projectExists(projectId: string): Promise<boolean> {
   return r.rows[0]?.ok ?? false;
 }
 
-// The owning project of an invite (flat item route /invites/:id), or null.
-export async function projectOfInvite(
-  inviteId: string,
-): Promise<string | null> {
-  const r = await db.execute<{ pid: string | null }>(
-    sql`select project_of_invite(${inviteId}) as pid`,
-  );
-  return r.rows[0]?.pid ?? null;
-}
-
 // Flat scoped item routes (/tasks/:id, /milestones/:id, /docs/:id,
 // /project-notes/:id) resolve their owning project the same RLS-bypassing way,
 // so the API can 403-vs-404 before it fetches. `kind` picks the resolver fn.

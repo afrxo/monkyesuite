@@ -49,5 +49,4 @@ export const TTL = {
   gameDetail: 20_000,
   timeseries: 30_000,
   tags: 60_000,
-  notes: 10_000,
 } as const;

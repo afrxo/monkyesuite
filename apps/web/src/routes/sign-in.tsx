@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { useSignIn } from "../lib/auth";
 
@@ -49,10 +49,7 @@ function SignInPage() {
         </button>
       </form>
       <p className="mt-4 text-sm text-neutral-500">
-        No account?{" "}
-        <Link to="/sign-up" className="text-indigo-400 hover:underline">
-          Create one
-        </Link>
+        Accounts are created by an administrator.
       </p>
     </AuthShell>
   );

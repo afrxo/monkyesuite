@@ -9,8 +9,10 @@ import {
   users,
   verifications,
 } from "@monkyesuite/database";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { eq } from "drizzle-orm";
 import { db } from "./db.js";
 
 const webOrigins = (process.env.WEB_ORIGIN ?? "http://localhost:3000")
@@ -34,4 +36,26 @@ export const auth = betterAuth({
       verification: verifications,
     },
   }),
+  // Closed suite (specs/06 §6.6): a revoked user must be refused a FRESH
+  // sign-in, not just have their existing session die. Deleting their
+  // `sessions` rows (the admin revoke action) handles the existing-session
+  // half; this hook is the sign-in half — it runs before Better Auth issues a
+  // new session, so a disabled user never gets one back.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/sign-in/email") return;
+      const email = (ctx.body as { email?: unknown } | undefined)?.email;
+      if (typeof email !== "string") return;
+      const [row] = await db
+        .select({ disabled: users.disabled })
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+      if (row?.disabled) {
+        throw new APIError("FORBIDDEN", {
+          message: "This account has been disabled.",
+        });
+      }
+    }),
+  },
 });

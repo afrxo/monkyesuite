@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SignInRouteImport } from './routes/sign-in'
-import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as GamesIdRouteImport } from './routes/games.$id'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
@@ -24,11 +23,6 @@ const IndexRoute = IndexRouteImport.update({
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SignUpRoute = SignUpRouteImport.update({
-  id: '/sign-up',
-  path: '/sign-up',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GamesIdRoute = GamesIdRouteImport.update({
@@ -50,7 +44,6 @@ const ProjectsIdRoute = ProjectsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
   '/games/$id': typeof GamesIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -58,7 +51,6 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
   '/games/$id': typeof GamesIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/projects': typeof ProjectsIndexRoute
@@ -67,28 +59,19 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
   '/games/$id': typeof GamesIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/projects/': typeof ProjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/sign-in'
-    | '/sign-up'
-    | '/games/$id'
-    | '/projects/$id'
-    | '/projects/'
+  fullPaths: '/' | '/sign-in' | '/games/$id' | '/projects/$id' | '/projects/'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    '/' | '/sign-in' | '/sign-up' | '/games/$id' | '/projects/$id' | '/projects'
+  to: '/' | '/sign-in' | '/games/$id' | '/projects/$id' | '/projects'
   id:
     | '__root__'
     | '/'
     | '/sign-in'
-    | '/sign-up'
     | '/games/$id'
     | '/projects/$id'
     | '/projects/'
@@ -97,7 +80,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SignInRoute: typeof SignInRoute
-  SignUpRoute: typeof SignUpRoute
   GamesIdRoute: typeof GamesIdRoute
   ProjectsIdRoute: typeof ProjectsIdRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
@@ -117,13 +99,6 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-up': {
-      id: '/sign-up'
-      path: '/sign-up'
-      fullPath: '/sign-up'
-      preLoaderRoute: typeof SignUpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/games/$id': {
@@ -153,7 +128,6 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SignInRoute: SignInRoute,
-  SignUpRoute: SignUpRoute,
   GamesIdRoute: GamesIdRoute,
   ProjectsIdRoute: ProjectsIdRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,

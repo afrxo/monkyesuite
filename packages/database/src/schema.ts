@@ -78,13 +78,6 @@ export const noteVisibility = pgEnum("note_visibility", ["shared", "private"]);
 
 export const memberRole = pgEnum("member_role", ["owner", "member"]);
 
-export const inviteStatus = pgEnum("invite_status", [
-  "pending",
-  "accepted",
-  "revoked",
-  "expired",
-]);
-
 export const projectStatus = pgEnum("project_status", [
   "active",
   "paused",
@@ -577,6 +570,13 @@ export const users = pgTable("users", {
   // policy. Set out of band by SQL only; no code path writes it (that would let
   // the panel escalate its own privilege).
   isAdmin: boolean("is_admin").notNull().default(false),
+  // Closed-suite revocation (specs/06 §6.6). A revoked user is disabled, never
+  // deleted — deleting would orphan game_notes.author_id, audit_log.actor_id,
+  // and every created_by/assignee_id reference this user left behind. The
+  // session resolver (apps/api/src/middleware.ts) treats a disabled user's
+  // session as absent; revoking also deletes their `sessions` rows outright so
+  // an already-open tab dies on its next request, not just on next sign-in.
+  disabled: boolean("disabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -845,36 +845,6 @@ export const memberships = pgTable(
   ],
 ).enableRLS();
 
-export const invites = pgTable(
-  "invites",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    email: text("email").notNull(),
-    role: memberRole("role").notNull().default("member"),
-    token: text("token").notNull(),
-    status: inviteStatus("status").notNull().default("pending"),
-    invitedBy: text("invited_by")
-      .notNull()
-      .references(() => users.id),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }),
-  },
-  (t) => [
-    uniqueIndex("invites_token_uq").on(t.token),
-    index("invites_project_idx").on(t.projectId),
-    index("invites_email_idx").on(t.email),
-    pgPolicy("invites_member_rw", {
-      for: "all",
-      using: memberOf(t.projectId),
-    }),
-  ],
-).enableRLS();
-
 /**
  * milestones — phases within a build project ("prototype", "closed test",
  * "launch"). Tasks belong to at most one. This grouping is what makes the
@@ -1115,7 +1085,6 @@ export const projectsRelations = relations(projects, ({ many }) => ({
   docs: many(docs),
   notes: many(notes),
   games: many(projectGame),
-  invites: many(invites),
 }));
 
 export const membershipsRelations = relations(memberships, ({ one }) => ({

@@ -13,7 +13,6 @@ import type {
   GameDetail,
   GameEvent,
   GameMetric,
-  GameNote,
   GameStat,
   LifecycleEvent,
   Monetization,
@@ -60,8 +59,9 @@ import {
   validationError,
 } from "./errors.js";
 import { gameNoteRoutes } from "./gamenotes.js";
-import { type AppEnv, resolveSession } from "./middleware.js";
+import { type AppEnv, requireUser, resolveSession } from "./middleware.js";
 import { scopedRoutes } from "./scoped.js";
+import { tagRoutes } from "./tags.js";
 import { workspaceRoutes } from "./workspace.js";
 
 // Parse a Zod schema, converting failures into the 422 validation envelope.
@@ -92,7 +92,6 @@ const monetizationCache = new TtlCache<Monetization>(TTL.timeseries);
 const demandCache = new TtlCache<DemandOverlay>(TTL.timeseries);
 const gameTagsCache = new TtlCache<Tag[]>(TTL.tags);
 const tagsCache = new TtlCache<Tag[]>(TTL.tags);
-const notesCache = new TtlCache<GameNote[]>(TTL.notes);
 
 // Resolve a game or throw 404 — used before returning sub-resources so an
 // unknown universeId is a clean 404, not an empty list masquerading as data.
@@ -112,7 +111,16 @@ export function createApp() {
   // origin may (the operator opens it directly on the API host).
   app.use("/v1/*", cors({ origin: origins, credentials: true }));
 
-  // Better Auth owns /v1/auth/* (sign-up, sign-in, session, sign-out).
+  // Closed suite (specs/06 §6.1): public sign-up is disabled at the HTTP
+  // route, not merely hidden in the web UI. This must be registered BEFORE
+  // the /v1/auth/* wildcard below so it wins the match. The admin panel still
+  // creates accounts — it calls auth.api.signUpEmail(...) directly, in
+  // process, which never touches this route at all.
+  app.on(["GET", "POST"], "/v1/auth/sign-up/email", (c) =>
+    sendError(c, notFound("Sign-up is disabled.")),
+  );
+
+  // Better Auth owns the rest of /v1/auth/* (sign-in, session, sign-out).
   app.on(["GET", "POST"], "/v1/auth/*", (c) => auth.handler(c.req.raw));
 
   app.onError((err, c) => {
@@ -128,9 +136,16 @@ export function createApp() {
   app.get("/health", (c) => c.json({ ok: true }));
 
   const v1 = new Hono<AppEnv>();
-  // Resolve the session (if any) for every global route. Absence is fine here —
-  // these are auth-optional; only game-notes reads change when a user is present.
+  // Closed suite (specs/06 §6.6): every /v1 route requires a session at
+  // minimum, including the reads that used to be public (feed, discovery,
+  // game detail, tags, game-notes). requireUser is the chokepoint — it throws
+  // 401 for both no session and a disabled one (resolveSession already
+  // collapses the latter into the former).
   v1.use("*", resolveSession);
+  v1.use("*", async (c, next) => {
+    requireUser(c);
+    await next();
+  });
 
   /* ------------------------------- feed --------------------------------- */
   v1.get("/feed", async (c) => {
@@ -216,31 +231,31 @@ export function createApp() {
   });
 
   /* --------------------------- game notes ------------------------------- */
-  // Global/optional: signed-out returns shared notes only; signed-in adds the
-  // caller's own private notes (RLS via app.current_user_id) and flips isOwn.
-  // Only the anonymous result is cached — a per-user response must never be
-  // shared across callers.
+  // Every caller is authenticated now (specs/06 §6.6), so this always returns
+  // shared + the caller's own-private notes (RLS via app.current_user_id) with
+  // isOwn flipped correctly. Never cached — the response is per-user.
   v1.get("/games/:universeId/notes", async (c) => {
     const id = parseUniverseId(c.req.param("universeId"));
     await assertGame(id);
-    const userId = c.get("userId");
-    if (userId) return c.json(await getGameNotes(id, userId));
-    return c.json(await notesCache.get(String(id), () => getGameNotes(id)));
+    const userId = requireUser(c);
+    return c.json(await getGameNotes(id, userId));
   });
 
   app.route("/v1", v1);
   // Scoped realm (auth required). Each router resolves membership/authorship
   // through the shared helper before touching data (07-api.md §7.1).
-  //   scopedRoutes    — projects, membership, invites
+  //   scopedRoutes    — projects, membership
   //   boardRoutes     — board, tasks, milestones
   //   workspaceRoutes — docs, notes, pinned games
   //   gameNoteRoutes  — game-note authoring (global-realm, author-gated)
+  //   tagRoutes       — tag vocabulary + application (global-realm, authenticated)
   const scoped = new Hono<AppEnv>();
   scoped.use("*", resolveSession);
   scoped.route("/", scopedRoutes());
   scoped.route("/", boardRoutes());
   scoped.route("/", workspaceRoutes());
   scoped.route("/", gameNoteRoutes());
+  scoped.route("/", tagRoutes());
   app.route("/v1", scoped);
   // Operator surface (specs/09). Outside /v1 and outside the JSON contract:
   // server-rendered HTML behind the admin-only gate, with its own error

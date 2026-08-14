@@ -21,7 +21,6 @@ import type {
   GameMetric,
   GameNote,
   GameStat,
-  Invite,
   LifecycleEvent,
   LifecycleStage,
   Membership,
@@ -163,14 +162,10 @@ export const api = {
   deleteProject: (id: string) => del(`/projects/${id}`),
 
   members: (id: string) => get<Membership[]>(`/projects/${id}/members`),
+  addMember: (id: string, email: string) =>
+    post<Membership>(`/projects/${id}/members`, { email }),
   removeMember: (id: string, userId: string) =>
     del(`/projects/${id}/members/${userId}`),
-  invites: (id: string) => get<Invite[]>(`/projects/${id}/invites`),
-  createInvite: (id: string, email: string) =>
-    post<Invite>(`/projects/${id}/invites`, { email }),
-  revokeInvite: (inviteId: string) => del(`/invites/${inviteId}`),
-  acceptInvite: (token: string) =>
-    post<Membership>(`/invites/${token}/accept`, {}),
 
   // Board.
   board: (id: string) => get<Board>(`/projects/${id}/board`),

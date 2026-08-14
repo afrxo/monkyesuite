@@ -646,3 +646,36 @@ export async function secretStatuses(): Promise<SecretStatus[]> {
     };
   });
 }
+
+/* --------------------------- 9.3a identity roster -------------------------- */
+
+export interface UserRow {
+  id: string;
+  email: string;
+  name: string | null;
+  isAdmin: boolean;
+  disabled: boolean;
+  createdAt: Date;
+}
+
+/** Every account, newest first. `users` carries no RLS (specs/06 §6.1). */
+export async function listUsers(limit = 200): Promise<UserRow[]> {
+  const r = await db.execute<{
+    id: string;
+    email: string;
+    name: string | null;
+    is_admin: boolean;
+    disabled: boolean;
+    created_at: Date;
+  }>(sql`
+    select id, email, name, is_admin, disabled, created_at
+    from users order by created_at desc limit ${limit}`);
+  return r.rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    isAdmin: row.is_admin,
+    disabled: row.disabled,
+    createdAt: row.created_at,
+  }));
+}

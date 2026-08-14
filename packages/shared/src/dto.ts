@@ -8,7 +8,6 @@
 
 import type {
   DemandKind,
-  InviteStatus,
   LifecycleEventType,
   LifecycleStage,
   MemberRole,
@@ -255,17 +254,9 @@ export interface Membership {
   user: { id: string; name: string | null; email: string };
 }
 
-// Token is never serialized — it travels only in the invite email.
-export interface Invite {
-  id: string;
-  projectId: string;
-  email: string;
-  role: MemberRole;
-  status: InviteStatus;
-  invitedBy: string;
-  createdAt: string;
-  expiresAt: string | null;
-}
+// No Invite type — adding a collaborator is a direct membership write against
+// an existing account (docs/api-contract.md review flag 4). See Membership
+// above for the shape POST /projects/:id/members returns.
 
 /* ------------------------------- board ------------------------------------ */
 
