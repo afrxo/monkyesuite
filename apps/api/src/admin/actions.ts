@@ -68,7 +68,7 @@ export const revokeUserSchema = z
     confirm: z.string(),
   })
   .refine((v) => v.confirm.trim() === v.email, {
-    message: "Confirmation must repeat the user's email.",
+    message: "Confirmation must repeat the user's username.",
     path: ["confirm"],
   });
 
@@ -313,7 +313,7 @@ export async function createUserAction(c: Context<AdminEnv>): Promise<Raw> {
     console.error("[admin] user create failed");
     return bad(
       err instanceof Error && /exist/i.test(err.message)
-        ? "an account with that email already exists"
+        ? "an account with that username already exists"
         : "could not create user",
     );
   }
@@ -367,7 +367,7 @@ export async function addMemberAction(c: Context<AdminEnv>): Promise<Raw> {
     return bad("collaborator cap reached (two per project)");
   }
   if (result === "no_project") return bad("no such project");
-  if (result === "no_user") return bad("no user with that email");
+  if (result === "no_user") return bad("no user with that username");
   if (result === "already_member") return bad("already a member of that project");
   if (result !== "ok") return bad("add member failed");
   return ok(`added ${email} to the project`);
@@ -415,7 +415,7 @@ export async function revokeUserAction(c: Context<AdminEnv>): Promise<Raw> {
     return "ok" as const;
   });
 
-  if (result === "no_user") return bad("no user with that email");
+  if (result === "no_user") return bad("no user with that username");
   if (result === "already_disabled") return bad("that user is already revoked");
   if (result === "last_admin") {
     return bad("cannot revoke the last admin — create another admin first");

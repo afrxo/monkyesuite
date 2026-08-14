@@ -18,12 +18,16 @@ import { db } from "./db.js";
 const webOrigins = (process.env.WEB_ORIGIN ?? "http://localhost:3000")
   .split(",")
   .map((s) => s.trim());
+const apiOrigin = process.env.API_BASE_URL ?? "http://localhost:8787";
 
 export const auth = betterAuth({
-  baseURL: process.env.API_BASE_URL ?? "http://localhost:8787",
+  baseURL: apiOrigin,
   basePath: "/v1/auth",
   secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-secret-change-me-please",
-  trustedOrigins: webOrigins,
+  // apps/web (fetch, cross-origin) plus the API's own origin — /admin/login
+  // (specs/09 §9.2) posts to this endpoint same-origin from :8787 itself, so
+  // its Origin header (when the browser sends one) needs to be trusted too.
+  trustedOrigins: [...webOrigins, apiOrigin],
   emailAndPassword: { enabled: true, autoSignIn: true },
   database: drizzleAdapter(db, {
     provider: "pg",

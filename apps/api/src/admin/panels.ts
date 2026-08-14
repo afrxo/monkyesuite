@@ -411,14 +411,14 @@ escalate its own privilege. Adding a collaborator to a project is a direct
 write against an EXISTING account by email — there is no invite/token step
 (specs/06 §6.3).</p>
 <form hx-post="/admin/actions/users/create" hx-target="#panel-identity-flash">
-  <input name="email" type="email" placeholder="email" required>
+  <input name="email" type="text" placeholder="username" required>
   <input name="name" placeholder="name">
   <input name="password" type="password" placeholder="temp password" required minlength="8">
   <button type="submit">create user</button>
 </form>
 <form hx-post="/admin/actions/members/add" hx-target="#panel-identity-flash">
   <input name="projectId" placeholder="project uuid" size="24" required>
-  <input name="email" type="email" placeholder="existing user's email" required>
+  <input name="email" type="text" placeholder="existing user's username" required>
   <select name="role"><option value="member">member</option><option value="owner">owner</option></select>
   <button type="submit">add to project</button>
 </form>
@@ -432,7 +432,7 @@ export async function usersPanel(): Promise<Raw> {
   const rows = await listUsers();
   return html`
 <table>
-<tr><th>email</th><th>name</th><th>admin</th><th>status</th><th>created</th><th></th></tr>
+<tr><th>username</th><th>name</th><th>admin</th><th>status</th><th>created</th><th></th></tr>
 ${rows.map((u) => {
   const statusCell = u.disabled
     ? html`<span class="bad">revoked</span>`
@@ -442,7 +442,7 @@ ${rows.map((u) => {
     : html`<form hx-post="/admin/actions/users/revoke" hx-target="#panel-identity-flash"
              hx-confirm="Revoke ${u.email}? Their session dies immediately and sign-in is refused.">
         <input type="hidden" name="email" value="${u.email}">
-        <input name="confirm" placeholder="type email to confirm" size="20" required>
+        <input name="confirm" placeholder="type username to confirm" size="20" required>
         <button type="submit">revoke</button>
       </form>`;
   return html`<tr>

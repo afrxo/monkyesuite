@@ -92,10 +92,10 @@ export function MembersPanel({
           </h2>
           <form onSubmit={onAddMember} className="mb-3 flex items-center gap-2">
             <input
-              type="email"
+              type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="existing user's email"
+              placeholder="existing user's username"
               className="flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
             />
             <button

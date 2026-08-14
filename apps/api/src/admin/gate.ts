@@ -22,12 +22,14 @@ import type { Context, MiddlewareHandler, Next } from "hono";
 import { db } from "../db.js";
 import type { AppEnv } from "../middleware.js";
 import { clientIp, writeAuditDetached } from "./audit.js";
-import { bare, html } from "./html.js";
+import { ASSETS, bare, html } from "./html.js";
 
 export const LOGIN_PATH = "/admin/login";
 
-/** The one ungated path under the mount (§9.2). */
-const UNGATED = new Set<string>([LOGIN_PATH]);
+// The login page (bare(), self-contained inline styles) needs no other asset
+// signed-out — except its own submit handler (auth.js), which must be
+// reachable before a session exists. Nothing else under the mount is ungated.
+const UNGATED = new Set<string>([LOGIN_PATH, ASSETS.authJs.href]);
 
 export interface AdminEnv extends AppEnv {
   Variables: AppEnv["Variables"] & { adminId: string };

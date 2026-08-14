@@ -36,6 +36,7 @@ import {
 import {
   ADMIN_JS,
   ASSETS,
+  AUTH_JS,
   bare,
   CSP,
   html,
@@ -132,20 +133,27 @@ export function adminRoutes(): Hono<AdminEnv> {
   asset(ASSETS.htmx.route, "text/javascript; charset=utf-8", htmxBytes);
   asset(ASSETS.js.route, "text/javascript; charset=utf-8", () => ADMIN_JS);
   asset(ASSETS.css.route, "text/css; charset=utf-8", () => STYLES);
+  asset(ASSETS.authJs.route, "text/javascript; charset=utf-8", () => AUTH_JS);
 
   /* ------------------------------- login --------------------------------- */
   // The only ungated route. It renders the same form for everyone: signing in
   // as a non-admin lands on the 403 page, which says nothing about a panel.
+  // Submits via fetch (auth.js), not a plain form nav — Better Auth's origin
+  // check needs a real Origin header, which a top-level form POST doesn't
+  // reliably send, and fetch also lets a success land back on /admin instead
+  // of dead-ending on the raw JSON response.
   admin.get("/login", (c) =>
     c.html(
       bare(
         "Sign in",
         html`<div class="card"><h1>monkyesuite</h1>
-<form method="post" action="/v1/auth/sign-in/email">
-  <input name="email" type="email" placeholder="email" required>
+<form id="login-form">
+  <input name="email" type="text" placeholder="username" required>
   <input name="password" type="password" placeholder="password" required>
   <button type="submit">sign in</button>
-</form></div>`,
+  <p id="login-err" class="err"></p>
+</form></div>
+<script src="${ASSETS.authJs.href}" defer></script>`,
       ),
     ),
   );

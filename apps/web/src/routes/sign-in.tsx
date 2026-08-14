@@ -24,11 +24,11 @@ function SignInPage() {
     <AuthShell title="Sign in" subtitle="Back to your build workspaces.">
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <Field
-          label="Email"
-          type="email"
+          label="Username"
+          type="text"
           value={email}
           onChange={setEmail}
-          autoComplete="email"
+          autoComplete="username"
         />
         <Field
           label="Password"

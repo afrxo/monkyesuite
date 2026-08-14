@@ -83,6 +83,7 @@ export const ASSETS = {
   htmx: { href: "/admin/assets/htmx.js", route: "/assets/htmx.js" },
   css: { href: "/admin/assets/admin.css", route: "/assets/admin.css" },
   js: { href: "/admin/assets/admin.js", route: "/assets/admin.js" },
+  authJs: { href: "/admin/assets/auth.js", route: "/assets/auth.js" },
 } as const;
 
 export const STYLES = `
@@ -145,6 +146,45 @@ document.body.addEventListener('htmx:sendError', (evt) => {
 });
 `;
 
+/**
+ * Login form submit handler (§9.2). Better Auth's origin check treats a plain
+ * cross-navigation form POST as untrustworthy (no reliable Origin header on
+ * a same-origin top-level nav in every browser) — fetch always sets one, and
+ * unlike the bare form this can land back on /admin on success. CSP here is
+ * script-src 'self' with no 'unsafe-inline', so this has to be an external
+ * asset, not an inline <script>.
+ */
+export const AUTH_JS = `
+document.getElementById('login-form')?.addEventListener('submit', async (evt) => {
+  evt.preventDefault();
+  const form = evt.target;
+  const err = document.getElementById('login-err');
+  if (err) err.textContent = '';
+  const body = {
+    email: form.email.value,
+    password: form.password.value,
+  };
+  let res;
+  try {
+    res = await fetch('/v1/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
+  } catch {
+    if (err) err.textContent = 'network error — API unreachable';
+    return;
+  }
+  if (res.ok) {
+    window.location.href = '/admin';
+    return;
+  }
+  const data = await res.json().catch(() => null);
+  if (err) err.textContent = (data && data.message) || 'sign-in failed';
+});
+`;
+
 /* -------------------------------------------------------------------------- */
 /*  Page shell                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -190,6 +230,7 @@ font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 input,button{font:inherit;font-size:12px;background:#0c0e13;color:#d7dce5;
 border:1px solid #262b36;border-radius:4px;padding:5px 8px}
 button{cursor:pointer;border-color:#5b8def;color:#cfe0ff}
+.err{color:#e0533d;font-size:12px;margin:4px 0 0}
 </style></head><body>${body.value}</body></html>`;
 }
 
