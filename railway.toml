@@ -1,0 +1,34 @@
+# monkye-api — Railway config-as-code (specs/10-deployment.md §10.5)
+#
+# This file is at the REPO ROOT on purpose. Railway looks for railway.toml at the
+# root by default, so monkye-api picks it up with NO dashboard configuration —
+# leave every build and deploy field in that service untouched.
+#
+# monkye-worker is the one exception. Both services would otherwise read THIS
+# file (and the worker would then build the API image and run migrations), so
+# that service needs exactly one dashboard field set:
+#   Config-as-code path = apps/worker/railway.toml
+# That path is absolute from the repo root and does NOT follow Root Directory.
+# Leave Root Directory at its default (/) on both services — the Docker builds
+# need the root pnpm lockfile and packages/* in the build context.
+#
+# Config-as-code covers build + deploy settings only. Environment variables
+# cannot live here; see specs/10-deployment.md §10.6 for the per-service list.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/api/Dockerfile"
+# packages/** is in here because the API imports @monkyesuite/{core,database,shared}
+# as source, and because a schema change must redeploy the API — the API start
+# command is what runs migrations.
+watchPatterns = ["apps/api/**", "packages/**", "pnpm-lock.yaml"]
+
+[deploy]
+# /health is unauthenticated and registered before /v1 in apps/api/src/app.ts.
+healthcheckPath = "/health"
+# Generous: the container runs the full migration chain (functions → schema →
+# roles) before it starts listening, and a cold first deploy applies every
+# migration at once.
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

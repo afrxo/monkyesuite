@@ -1,8 +1,10 @@
-# monkye-worker — Railway config-as-code (specs/10-deployment.md §5)
+# monkye-worker — Railway config-as-code (specs/10-deployment.md §10.5)
 #
-# In the monkye-worker service settings set:
-#   Root Directory     = /
+# THE ONE DASHBOARD FIELD THIS PROJECT NEEDS. On the monkye-worker service set:
 #   Config-as-code path = apps/worker/railway.toml
+# Without it the worker falls back to the ROOT railway.toml, builds the API
+# image, and runs migrations on every worker deploy. Everything else — including
+# Root Directory, which stays at its default (/) — is left alone.
 
 [build]
 builder = "DOCKERFILE"

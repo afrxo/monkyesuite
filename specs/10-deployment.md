@@ -136,16 +136,24 @@ it. Grants are never applied by hand after the first deploy.
 ## 10.5 Railway configuration
 
 Railway resolves **one service per config file**, so the two services cannot share
-a root `railway.toml`. There are two files, and the path is resolved from the repo
-root — it does **not** follow the service's Root Directory.
+one file. The split is arranged so the dashboard needs touching as little as
+possible:
 
-| Service | Root Directory | Config-as-code path |
+| Service | Config file | Dashboard fields to set |
 |---|---|---|
-| monkye-api | `/` | `apps/api/railway.toml` |
-| monkye-worker | `/` | `apps/worker/railway.toml` |
+| monkye-api | `railway.toml` (repo root) | **none** — the root file is Railway's default lookup |
+| monkye-worker | `apps/worker/railway.toml` | **one**: Config-as-code path = `apps/worker/railway.toml` |
 
-Root Directory stays `/` on both so the root lockfile and `packages/*` are in the
-build context.
+That one field is not optional. Without it the worker also reads the root
+`railway.toml`, builds the **API** image, and runs migrations on every worker
+deploy. The config path is absolute from the repo root and does **not** follow
+Root Directory.
+
+Root Directory stays at its default `/` on both services so the root lockfile and
+`packages/*` are in the build context. Everything else about the build and deploy
+is in the two files — builder, Dockerfile path, watch paths, healthcheck, restart
+policy. **Environment variables are the only thing Railway config-as-code cannot
+express** (§10.6).
 
 - **monkye-api** — `watchPatterns = ["apps/api/**", "packages/**", "pnpm-lock.yaml"]`.
   `packages/**` is there for two reasons: the API imports those packages as
@@ -203,6 +211,37 @@ registry — until then, this is what it does.
 
 `VITE_API_BASE_URL` is inlined at **build** time (`apps/web/src/lib/api.ts`,
 `authClient.ts`). Changing it needs a rebuild, not a redeploy.
+
+### Paste-ready blocks
+
+Railway's variable editor takes a bulk `KEY=VALUE` paste. Fill the placeholders;
+everything else is literal.
+
+**monkye-api** — `DATABASE_URL` comes from the Postgres plugin's variable
+reference, so it stays a reference rather than a pasted string:
+
+```
+APP_DATABASE_URL=postgres://monkye_app:<rotated-pw>@<pghost>:<pgport>/railway
+BETTER_AUTH_SECRET=<openssl rand -base64 32>
+API_BASE_URL=https://<api-subdomain>.up.railway.app
+WEB_ORIGIN=https://<worker-subdomain>.workers.dev
+NODE_ENV=production
+```
+
+**monkye-worker**:
+
+```
+DATABASE_URL=postgres://monkye_service:<rotated-pw>@<pghost>:<pgport>/railway
+YOUTUBE_API_KEY=<key>
+WORKER_TICK_INTERVAL=5m
+```
+
+**Cloudflare** build variables:
+
+```
+NODE_VERSION=22
+VITE_API_BASE_URL=https://<api-subdomain>.up.railway.app/v1
+```
 
 ---
 
@@ -354,8 +393,10 @@ runs. Setting it only on monkye-api makes the panel green and changes nothing.
 
 ## 10.10 First deploy — run once, in order
 
-- [ ] Repo connected to the Railway project; both services created with Root
-      Directory `/` and their Config-as-code path set (§10.5)
+- [ ] Repo connected to the Railway project; both services created from it.
+      monkye-api needs **no** build/deploy settings (it reads the root
+      `railway.toml`); monkye-worker needs **one** field — Config-as-code path
+      = `apps/worker/railway.toml` (§10.5)
 - [ ] Repo connected to Cloudflare Workers Builds (build + deploy commands,
       `NODE_VERSION=22`)
 - [ ] CI green on `main` — all four jobs, including lint
