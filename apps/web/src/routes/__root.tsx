@@ -98,28 +98,38 @@ function Layout() {
     return <Outlet />;
   }
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
-      <header className="mb-8 flex items-center justify-between border-b border-border-1 pb-4">
-        <nav className="flex items-baseline gap-5">
-          <Link to="/" className="flex items-baseline gap-2">
-            <span className="text-xl font-semibold tracking-tight text-text-1">
-              monkyesuite
-            </span>
-            <span className="font-serif text-base italic text-text-4">
+    <>
+      <header
+        className="sticky top-0 z-50 flex h-14 items-center justify-between border-b border-border-1 px-8 backdrop-blur-md"
+        style={{ background: "rgba(12,12,13,0.85)" }}
+      >
+        <nav className="flex items-center gap-8">
+          <Link
+            to="/"
+            className="flex items-center gap-2 text-sm font-semibold tracking-tight text-text-1"
+            style={{ letterSpacing: "-0.02em" }}
+          >
+            <span>monkyesuite</span>
+            <span
+              className="font-serif italic text-text-4"
+              style={{ fontWeight: 400 }}
+            >
               Pulse
             </span>
           </Link>
           <Link
             to="/projects"
-            className="text-sm text-text-3 transition-colors hover:text-text-1 [&.active]:text-text-1"
+            className="text-sm text-text-2 transition-colors hover:text-text-1 [&.active]:text-text-1"
           >
             Projects
           </Link>
         </nav>
         <AuthNav />
       </header>
-      <Outlet />
-    </div>
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <Outlet />
+      </div>
+    </>
   );
 }
 
