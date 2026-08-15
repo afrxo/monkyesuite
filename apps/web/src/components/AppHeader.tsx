@@ -68,20 +68,12 @@ const brandStyle: CSSProperties = {
   flexShrink: 0,
 };
 
-const brandMark: CSSProperties = {
-  width: 22,
-  height: 22,
-  borderRadius: 6,
-  background: "var(--text-1)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "var(--surface-0)",
+const brandPulse: CSSProperties = {
   fontFamily: "var(--font-serif)",
   fontStyle: "italic",
-  fontSize: 13,
-  fontWeight: 700,
-  flexShrink: 0,
+  fontWeight: 400,
+  color: "var(--text-4)",
+  fontSize: 14,
 };
 
 const navRowStyle: CSSProperties = {
@@ -165,8 +157,8 @@ export default function AppHeader({
     <header style={shell}>
       <div style={leftWrap}>
         <a href="/" style={brandStyle}>
-          <span style={brandMark}>L</span>
-          Trend Lens
+          <span>monkyesuite</span>
+          <span style={brandPulse}>Pulse</span>
         </a>
         {breadcrumb ? (
           <div

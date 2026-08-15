@@ -22,11 +22,7 @@ function SignInPage() {
   };
 
   return (
-    <AuthShell
-      eyebrow="monkyesuite"
-      title="Sign in"
-      subtitle="Back to your build workspaces."
-    >
+    <AuthShell eyebrow="monkyesuite" title="Sign in">
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <Field
           label="Username"
@@ -51,9 +47,6 @@ function SignInPage() {
           {signIn.isPending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
-      <p className="mt-6 text-xs text-text-5">
-        Accounts are created by an administrator.
-      </p>
     </AuthShell>
   );
 }
@@ -61,12 +54,10 @@ function SignInPage() {
 export function AuthShell({
   eyebrow,
   title,
-  subtitle,
   children,
 }: {
   eyebrow?: string;
   title: string;
-  subtitle: string;
   children: React.ReactNode;
 }) {
   return (
@@ -77,10 +68,9 @@ export function AuthShell({
             {eyebrow}
           </div>
         ) : null}
-        <h1 className="font-serif text-3xl italic leading-tight text-text-1">
+        <h1 className="mb-7 font-serif text-3xl italic leading-tight text-text-1">
           {title}
         </h1>
-        <p className="mb-7 mt-2 text-sm text-text-4">{subtitle}</p>
         {children}
       </div>
     </div>

@@ -23,8 +23,10 @@ const SIGNED_OUT_OK = new Set(["/sign-in"]);
 
 // Routes that render their own full-bleed chrome (e.g. Pulse renders its own
 // topbar + hero). These skip the wrapper container + suite nav bar so the
-// ported page keeps its own layout intact.
-const FULL_BLEED = new Set<string>(["/"]);
+// ported page keeps its own layout intact. /sign-in is here because it's the
+// only signed-out route and the suite nav (with its own Sign in button + nav
+// links) shouldn't chrome the login card.
+const FULL_BLEED = new Set<string>(["/", "/sign-in"]);
 
 export const Route = createRootRoute({
   head: () => ({
