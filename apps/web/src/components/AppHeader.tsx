@@ -4,7 +4,7 @@ import { fmtRelative } from "#/lib/format";
 import type { JobHealthRecord } from "#/lib/system-health";
 import { computeSystemHealth } from "#/lib/system-health";
 
-type ActiveRoute = "pulse" | "discover" | "watchlist" | "pricing";
+type ActiveRoute = "pulse" | "projects";
 
 type AppHeaderProps = {
   activeRoute?: ActiveRoute;
@@ -25,11 +25,10 @@ const TONE_DOT: Partial<Record<string, string>> = {
   stale: "var(--text-4)",
 };
 
-// Feature nav — product destinations only. Pricing lives in the right rail as a CTA.
+// Suite-wide nav — Pulse (public trend surface) and Projects (scoped workspaces).
 const NAV_ITEMS: { key: ActiveRoute; href: string; label: string }[] = [
   { key: "pulse", href: "/", label: "Pulse" },
-  { key: "discover", href: "/discover", label: "Discover" },
-  { key: "watchlist", href: "/watchlist", label: "Watchlist" },
+  { key: "projects", href: "/projects", label: "Projects" },
 ];
 
 const shell: CSSProperties = {

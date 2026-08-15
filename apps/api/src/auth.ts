@@ -42,6 +42,14 @@ export const auth = betterAuth({
       partitioned: true,
     },
   },
+  // 30-day sessions, slide the expiry forward whenever we've seen the user in
+  // the last day. Better Auth's defaults are 7d / 1d refresh, which felt like
+  // "signed out again already" in practice; a small closed suite doesn't need
+  // shorter windows and there's no shared-device risk to price in.
+  session: {
+    expiresIn: 60 * 60 * 24 * 30,
+    updateAge: 60 * 60 * 24,
+  },
   emailAndPassword: { enabled: true, autoSignIn: true },
   database: drizzleAdapter(db, {
     provider: "pg",

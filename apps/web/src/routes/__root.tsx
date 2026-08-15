@@ -2,16 +2,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createRootRoute,
   HeadContent,
-  Link,
   Outlet,
   Scripts,
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import { Button } from "../components/ui/button";
+import AppHeader from "../components/AppHeader";
 import { TooltipProvider } from "../components/ui/tooltip";
-import { useSession, useSignOut } from "../lib/auth";
+import { useSession } from "../lib/auth";
 import appCss from "../styles.css?url";
 
 // Closed suite (specs/06 §6.6): the sign-in page is the only route that
@@ -97,35 +96,11 @@ function Layout() {
     // + hero + rail. Wrapping it in the suite nav would double-chrome it.
     return <Outlet />;
   }
+  const activeRoute =
+    location.pathname.startsWith("/projects") ? "projects" : undefined;
   return (
     <>
-      <header
-        className="sticky top-0 z-50 flex h-14 items-center justify-between border-b border-border-1 px-8 backdrop-blur-md"
-        style={{ background: "rgba(12,12,13,0.85)" }}
-      >
-        <nav className="flex items-center gap-8">
-          <Link
-            to="/"
-            className="flex items-center gap-2 text-sm font-semibold tracking-tight text-text-1"
-            style={{ letterSpacing: "-0.02em" }}
-          >
-            <span>monkyesuite</span>
-            <span
-              className="font-serif italic text-text-4"
-              style={{ fontWeight: 400 }}
-            >
-              Pulse
-            </span>
-          </Link>
-          <Link
-            to="/projects"
-            className="text-sm text-text-2 transition-colors hover:text-text-1 [&.active]:text-text-1"
-          >
-            Projects
-          </Link>
-        </nav>
-        <AuthNav />
-      </header>
+      <AppHeader activeRoute={activeRoute} />
       <div className="mx-auto max-w-6xl px-4 py-6">
         <Outlet />
       </div>
@@ -151,32 +126,6 @@ function AuthGate({ children }: { children: ReactNode }) {
   if (exempt) return <>{children}</>;
   if (isPending || !user) return null;
   return <>{children}</>;
-}
-
-// Sign-in link when signed out; email + sign-out when signed in.
-function AuthNav() {
-  const { user, isPending } = useSession();
-  const signOut = useSignOut();
-  if (isPending) return <span className="text-xs text-text-5">…</span>;
-  if (!user) {
-    return (
-      <Button asChild size="sm">
-        <Link to="/sign-in">Sign in</Link>
-      </Button>
-    );
-  }
-  return (
-    <div className="flex items-center gap-3 text-sm">
-      <span className="text-text-3">{user.name ?? user.email}</span>
-      <button
-        type="button"
-        onClick={() => signOut.mutate()}
-        className="text-text-4 transition-colors hover:text-text-2"
-      >
-        Sign out
-      </button>
-    </div>
-  );
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
