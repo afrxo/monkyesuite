@@ -67,14 +67,6 @@ const brandStyle: CSSProperties = {
   flexShrink: 0,
 };
 
-const brandPulse: CSSProperties = {
-  fontFamily: "var(--font-serif)",
-  fontStyle: "italic",
-  fontWeight: 400,
-  color: "var(--text-4)",
-  fontSize: 14,
-};
-
 const navRowStyle: CSSProperties = {
   display: "flex",
   gap: 24,
@@ -156,8 +148,7 @@ export default function AppHeader({
     <header style={shell}>
       <div style={leftWrap}>
         <a href="/" style={brandStyle}>
-          <span>monkyesuite</span>
-          <span style={brandPulse}>Pulse</span>
+          monkyesuite
         </a>
         {breadcrumb ? (
           <div

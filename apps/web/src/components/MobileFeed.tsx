@@ -38,13 +38,6 @@ const styles = {
     color: "var(--text-1)",
     letterSpacing: "-0.01em",
   } satisfies CSSProperties,
-  brandPulse: {
-    fontFamily: "var(--font-serif)",
-    fontStyle: "italic",
-    fontWeight: 400,
-    color: "var(--text-4)",
-    fontSize: 14,
-  } satisfies CSSProperties,
   liveWrap: {
     display: "flex",
     alignItems: "center",
@@ -168,10 +161,7 @@ export default function MobileFeed({
   return (
     <div style={styles.root}>
       <div style={styles.topbar}>
-        <div style={styles.brand}>
-          <span>monkyesuite</span>
-          <span style={styles.brandPulse}>Pulse</span>
-        </div>
+        <div style={styles.brand}>monkyesuite</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {onSearchOpen && (
             <button
