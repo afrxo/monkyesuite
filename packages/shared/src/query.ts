@@ -79,7 +79,7 @@ export type PatchProjectInput = z.infer<typeof patchProjectSchema>;
 // closed suite has no one left to onboard-by-email, docs/api-contract.md
 // review flag 4).
 export const addMemberSchema = z.object({
-  email: z.string().email().max(320),
+  email: z.string().trim().min(1).max(320),
   role: z.enum(MEMBER_ROLES).default("member"),
 });
 export type AddMemberInput = z.infer<typeof addMemberSchema>;

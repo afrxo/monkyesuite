@@ -18,6 +18,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { auth } from "../auth.js";
 import { db } from "../db.js";
+import { toAuthEmail } from "../identity.js";
 import { type AuditEntry, clientIp, writeAudit } from "./audit.js";
 import { type AdminEnv, assertAdmin, assertSameOrigin } from "./gate.js";
 import { html, type Raw } from "./html.js";
@@ -59,13 +60,13 @@ export const untrackSchema = z
     path: ["confirm"],
   });
 export const createUserSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().min(1).max(255),
   name: z.string().trim().max(120).optional(),
   password: z.string().min(8).max(200),
 });
 export const addMemberSchema = z.object({
   projectId: z.string().uuid(),
-  email: z.string().email(),
+  email: z.string().trim().min(1).max(255),
   role: z.enum(["owner", "member"]).default("member"),
 });
 export const revokeUserSchema = z
@@ -303,7 +304,8 @@ export async function createUserAction(c: Context<AdminEnv>): Promise<Raw> {
   assertSameOrigin(c);
   const parsed = await form(c, createUserSchema);
   if (!parsed.ok) return bad(parsed.message);
-  const { email, name, password } = parsed.data;
+  const { name, password } = parsed.data;
+  const email = toAuthEmail(parsed.data.email);
 
   // Better Auth's own server API — same hashing, same accounts row, same
   // validation as public sign-up. A different caller, never a different
@@ -345,7 +347,8 @@ export async function addMemberAction(c: Context<AdminEnv>): Promise<Raw> {
   assertSameOrigin(c);
   const parsed = await form(c, addMemberSchema);
   if (!parsed.ok) return bad(parsed.message);
-  const { projectId, email, role } = parsed.data;
+  const { projectId, role } = parsed.data;
+  const email = toAuthEmail(parsed.data.email);
 
   // The privileged insert lives in admin_add_member (functions.sql): the admin
   // confers no project membership, so it can't go through the owner-gated

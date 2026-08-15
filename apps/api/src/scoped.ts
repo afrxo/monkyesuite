@@ -17,6 +17,7 @@ import {
 import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { resolveProjectAccess } from "./access.js";
+import { toAuthEmail, toDisplayUsername } from "./identity.js";
 import {
   conflict,
   isUniqueViolation,
@@ -192,7 +193,7 @@ export function scopedRoutes(): Hono<AppEnv> {
           code: string;
           membership_id: string | null;
         }>(
-          sql`select code, membership_id from add_member_by_email(${id}, ${body.data.email}, ${body.data.role})`,
+          sql`select code, membership_id from add_member_by_email(${id}, ${toAuthEmail(body.data.email)}, ${body.data.role})`,
         );
         const row = res.rows[0];
         switch (row?.code) {
@@ -266,6 +267,6 @@ async function listMembers(
     userId: m.userId,
     role: m.role,
     createdAt: isoReq(m.createdAt),
-    user: { id: m.uId, name: m.uName, email: m.uEmail },
+    user: { id: m.uId, name: m.uName, email: toDisplayUsername(m.uEmail) },
   }));
 }

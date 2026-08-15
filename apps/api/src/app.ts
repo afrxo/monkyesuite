@@ -38,6 +38,7 @@ import type { z } from "zod";
 import { adminRoutes } from "./admin/index.js";
 import { auth } from "./auth.js";
 import { boardRoutes } from "./board.js";
+import { toAuthEmail, toDisplayUsername } from "./identity.js";
 import { TTL, TtlCache } from "./cache.js";
 import {
   gameExists,
@@ -133,7 +134,43 @@ export function createApp() {
   );
 
   // Better Auth owns the rest of /v1/auth/* (sign-in, session, sign-out).
-  app.on(["GET", "POST"], "/v1/auth/*", (c) => auth.handler(c.req.raw));
+  // Its own body schema hardcodes z.email() with no config escape hatch, but
+  // `users.email` is really a username slot here (specs/06 §6.1 closed
+  // suite). So the boundary does the translation: append the synthetic
+  // suffix on the way in for sign-in, strip it back off any `user.email` in
+  // the JSON response — apps/web and its users never see or type an "@".
+  app.on(["GET", "POST"], "/v1/auth/*", async (c) => {
+    let req = c.req.raw;
+    if (c.req.path === "/v1/auth/sign-in/email" && c.req.method === "POST") {
+      const body = (await c.req.json().catch(() => null)) as
+        | { email?: unknown }
+        | null;
+      if (body && typeof body.email === "string") {
+        req = new Request(c.req.raw.url, {
+          method: "POST",
+          headers: c.req.raw.headers,
+          body: JSON.stringify({ ...body, email: toAuthEmail(body.email) }),
+        });
+      }
+    }
+    const res = await auth.handler(req);
+    if (
+      c.req.path === "/v1/auth/sign-in/email" ||
+      c.req.path === "/v1/auth/get-session"
+    ) {
+      const data = (await res.clone().json().catch(() => null)) as {
+        user?: { email?: unknown };
+      } | null;
+      if (data?.user && typeof data.user.email === "string") {
+        data.user.email = toDisplayUsername(data.user.email);
+        return new Response(JSON.stringify(data), {
+          status: res.status,
+          headers: res.headers,
+        });
+      }
+    }
+    return res;
+  });
 
   app.onError((err, c) => {
     const http = toHttpError(err);

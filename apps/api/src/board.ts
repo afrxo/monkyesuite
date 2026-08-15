@@ -26,6 +26,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { resolveItemAccess, resolveProjectAccess } from "./access.js";
 import { notFound, validationError } from "./errors.js";
+import { toDisplayUsername } from "./identity.js";
 import { type AppEnv, requireUser } from "./middleware.js";
 import { iso, isoReq } from "./serialize.js";
 import { type Tx, withUser } from "./tx.js";
@@ -65,7 +66,11 @@ function mapTask(row: TaskJoin, subtasks: Task[]): Task {
     assigneeId: t.assigneeId,
     assignee:
       t.assigneeId && row.assigneeEmail
-        ? { id: t.assigneeId, name: row.assigneeName, email: row.assigneeEmail }
+        ? {
+            id: t.assigneeId,
+            name: row.assigneeName,
+            email: toDisplayUsername(row.assigneeEmail),
+          }
         : null,
     universeId: t.universeId,
     game:
