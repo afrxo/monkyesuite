@@ -28,6 +28,20 @@ export const auth = betterAuth({
   // (specs/09 §9.2) posts to this endpoint same-origin from :8787 itself, so
   // its Origin header (when the browser sends one) needs to be trusted too.
   trustedOrigins: [...webOrigins, apiOrigin],
+  // apps/web (Cloudflare, monkyesuite.app) and apps/api (Railway, *.up.railway.app)
+  // are on different registrable domains — every session request from the web is
+  // cross-site, so the browser drops SameSite=Lax cookies (the default). None +
+  // Secure lets the session cookie ride cross-site; `useSecureCookies` also
+  // adds the __Secure- prefix. Http-only in dev falls back to non-secure so
+  // localhost still works.
+  advanced: {
+    useSecureCookies: process.env.NODE_ENV === "production",
+    defaultCookieAttributes: {
+      sameSite: "none",
+      secure: true,
+      partitioned: true,
+    },
+  },
   emailAndPassword: { enabled: true, autoSignIn: true },
   database: drizzleAdapter(db, {
     provider: "pg",
