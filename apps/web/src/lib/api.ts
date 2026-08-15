@@ -3,7 +3,11 @@
 // contract package so producer and consumer agree.
 
 import type {
+  AttachmentUploadTicket,
+  AttachmentViewTicket,
   Board,
+  CreateChecklistItemInput,
+  CreateCommentInput,
   CreateDocInput,
   CreateGameNoteInput,
   CreateMilestoneInput,
@@ -23,11 +27,14 @@ import type {
   GameStat,
   LifecycleEvent,
   LifecycleStage,
+  LinkedNote,
   Membership,
   Milestone,
   Monetization,
   MoveTaskInput,
   Paged,
+  PatchChecklistItemInput,
+  PatchCommentInput,
   PatchDocInput,
   PatchGameNoteInput,
   PatchMilestoneInput,
@@ -46,6 +53,10 @@ import type {
   SortSnapshot,
   Tag,
   Task,
+  TaskAttachment,
+  TaskChecklistItem,
+  TaskComment,
+  TaskDetail,
 } from "@monkyesuite/shared";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8787/v1";
@@ -224,4 +235,40 @@ export const api = {
     post<ProjectGame>(`/projects/${id}/games`, input),
   unlinkGame: (id: string, universeId: number) =>
     del(`/projects/${id}/games/${universeId}`),
+
+  // Card detail modal.
+  cardDetail: (taskId: string) => get<TaskDetail>(`/tasks/${taskId}/detail`),
+  cardLinkedNotes: (taskId: string) =>
+    get<LinkedNote[]>(`/tasks/${taskId}/linked-notes`),
+
+  createComment: (taskId: string, input: CreateCommentInput) =>
+    post<TaskComment>(`/tasks/${taskId}/comments`, input),
+  patchComment: (commentId: string, input: PatchCommentInput) =>
+    patch<TaskComment>(`/comments/${commentId}`, input),
+  deleteComment: (commentId: string) => del(`/comments/${commentId}`),
+
+  createChecklistItem: (taskId: string, input: CreateChecklistItemInput) =>
+    post<TaskChecklistItem>(`/tasks/${taskId}/checklist`, input),
+  patchChecklistItem: (itemId: string, input: PatchChecklistItemInput) =>
+    patch<TaskChecklistItem>(`/checklist/${itemId}`, input),
+  deleteChecklistItem: (itemId: string) => del(`/checklist/${itemId}`),
+
+  requestAttachmentUpload: (
+    taskId: string,
+    input: { fileName: string; mimeType: string; sizeBytes: number },
+  ) =>
+    post<AttachmentUploadTicket>(`/tasks/${taskId}/attachments/upload-url`, input),
+  confirmAttachment: (
+    taskId: string,
+    input: {
+      attachmentId: string;
+      fileName: string;
+      mimeType: string;
+      sizeBytes: number;
+    },
+  ) => post<TaskAttachment>(`/tasks/${taskId}/attachments/confirm`, input),
+  attachmentViewUrl: (attachmentId: string) =>
+    get<AttachmentViewTicket>(`/attachments/${attachmentId}/url`),
+  deleteAttachment: (attachmentId: string) =>
+    del(`/attachments/${attachmentId}`),
 };

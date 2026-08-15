@@ -125,6 +125,19 @@ export const milestoneStatus = pgEnum("milestone_status", [
   "done",
 ]);
 
+// Card-detail activity feed event kinds (specs/08-web card modal). Append-only
+// history rendered in the modal side column.
+export const taskActivityKind = pgEnum("task_activity_kind", [
+  "create",
+  "status_change",
+  "title_change",
+  "assignee_change",
+  "comment",
+  "attachment",
+  "checklist_add",
+  "checklist_complete",
+]);
+
 /* ========================================================================== */
 /*  GLOBAL REALM — scraped once, shared across all projects.                   */
 /*  Scraped tables have no RLS. The one exception is game_notes (user-authored */
@@ -1138,6 +1151,149 @@ export const projectGame = pgTable(
   ],
 ).enableRLS();
 
+/**
+ * task_comments — free-form markdown comments on a card. Author-only edits;
+ * everyone with project membership can read/create.
+ */
+export const taskComments = pgTable(
+  "task_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => users.id),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("task_comments_task_idx").on(t.taskId, t.createdAt),
+    index("task_comments_project_idx").on(t.projectId),
+    pgPolicy("task_comments_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * task_checklist_items — ordered subtasks under a card. `orderKey` is a
+ * fractional index within a taskId, same pattern as tasks.orderKey.
+ */
+export const taskChecklistItems = pgTable(
+  "task_checklist_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    done: boolean("done").notNull().default(false),
+    orderKey: text("order_key").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("task_checklist_task_idx").on(t.taskId, t.orderKey),
+    index("task_checklist_project_idx").on(t.projectId),
+    pgPolicy("task_checklist_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * task_attachments — file metadata for files stored in R2. r2Key is the
+ * canonical opaque object key; presigned URLs are minted per read.
+ */
+export const taskAttachments = pgTable(
+  "task_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    uploadedBy: text("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    r2Key: text("r2_key").notNull(),
+    thumbnailKey: text("thumbnail_key"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("task_attachments_r2_key_idx").on(t.r2Key),
+    index("task_attachments_task_idx").on(t.taskId, t.createdAt),
+    index("task_attachments_project_idx").on(t.projectId),
+    pgPolicy("task_attachments_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * task_activity — append-only event feed for a card. payload is a jsonb with
+ * event-shaped fields (old/new for changes, ids for referenced rows).
+ */
+export const taskActivity = pgTable(
+  "task_activity",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => users.id),
+    kind: taskActivityKind("kind").notNull(),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("task_activity_task_idx").on(t.taskId, t.createdAt),
+    index("task_activity_project_idx").on(t.projectId),
+    pgPolicy("task_activity_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
 /* -------------------------------------------------------------------------- */
 /*  Relations                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -1225,6 +1381,47 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     relationName: "subtasks",
   }),
   subtasks: many(tasks, { relationName: "subtasks" }),
+  comments: many(taskComments),
+  checklistItems: many(taskChecklistItems),
+  attachments: many(taskAttachments),
+  activity: many(taskActivity),
+}));
+
+export const taskCommentsRelations = relations(taskComments, ({ one }) => ({
+  task: one(tasks, { fields: [taskComments.taskId], references: [tasks.id] }),
+  author: one(users, {
+    fields: [taskComments.authorId],
+    references: [users.id],
+  }),
+}));
+
+export const taskChecklistItemsRelations = relations(
+  taskChecklistItems,
+  ({ one }) => ({
+    task: one(tasks, {
+      fields: [taskChecklistItems.taskId],
+      references: [tasks.id],
+    }),
+  }),
+);
+
+export const taskAttachmentsRelations = relations(taskAttachments, ({ one }) => ({
+  task: one(tasks, {
+    fields: [taskAttachments.taskId],
+    references: [tasks.id],
+  }),
+  uploader: one(users, {
+    fields: [taskAttachments.uploadedBy],
+    references: [users.id],
+  }),
+}));
+
+export const taskActivityRelations = relations(taskActivity, ({ one }) => ({
+  task: one(tasks, { fields: [taskActivity.taskId], references: [tasks.id] }),
+  actor: one(users, {
+    fields: [taskActivity.actorId],
+    references: [users.id],
+  }),
 }));
 
 /*

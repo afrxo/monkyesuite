@@ -50,6 +50,13 @@
       "when": 1786709962281,
       "tag": "0006_short_the_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786807669466,
+      "tag": "0007_lovely_absorbing_man",
+      "breakpoints": true
     }
   ]
 }

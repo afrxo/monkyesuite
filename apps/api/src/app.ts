@@ -38,6 +38,7 @@ import type { z } from "zod";
 import { adminRoutes } from "./admin/index.js";
 import { auth } from "./auth.js";
 import { boardRoutes } from "./board.js";
+import { cardRoutes } from "./cards.js";
 import { toAuthEmail, toDisplayUsername } from "./identity.js";
 import { TTL, TtlCache } from "./cache.js";
 import {
@@ -340,6 +341,7 @@ export function createApp() {
   scoped.use("*", resolveSession);
   scoped.route("/", scopedRoutes());
   scoped.route("/", boardRoutes());
+  scoped.route("/", cardRoutes());
   scoped.route("/", workspaceRoutes());
   scoped.route("/", gameNoteRoutes());
   scoped.route("/", tagRoutes());

@@ -26,6 +26,10 @@ const SIGNED_OUT_OK = new Set(["/sign-in"]);
 // only signed-out route and the suite nav (with its own Sign in button + nav
 // links) shouldn't chrome the login card.
 const FULL_BLEED = new Set<string>(["/", "/sign-in"]);
+// Workspace renders its own AppHeader (with breadcrumb + action slots) so it
+// can merge suite chrome and project chrome into a single 56px bar instead
+// of stacking two.
+const FULL_BLEED_PREFIX = ["/projects/"];
 
 export const Route = createRootRoute({
   head: () => ({
@@ -91,13 +95,17 @@ function RootComponent() {
 
 function Layout() {
   const location = useLocation();
-  if (FULL_BLEED.has(location.pathname)) {
-    // Pulse owns the whole surface: its own topbar (AppHeader / feed/Topbar)
-    // + hero + rail. Wrapping it in the suite nav would double-chrome it.
+  const fullBleed =
+    FULL_BLEED.has(location.pathname) ||
+    FULL_BLEED_PREFIX.some((p) => location.pathname.startsWith(p));
+  if (fullBleed) {
+    // Full-bleed routes own their whole surface (Pulse renders its own topbar
+    // + hero; workspace renders its own AppHeader with breadcrumb slots).
     return <Outlet />;
   }
-  const activeRoute =
-    location.pathname.startsWith("/projects") ? "projects" : undefined;
+  const activeRoute = location.pathname.startsWith("/projects")
+    ? "projects"
+    : undefined;
   return (
     <>
       <AppHeader activeRoute={activeRoute} />

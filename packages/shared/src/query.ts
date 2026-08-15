@@ -241,3 +241,44 @@ export const patchGameNoteSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, "no fields to update");
 export type PatchGameNoteInput = z.infer<typeof patchGameNoteSchema>;
+
+/* --------------------------- card detail writes --------------------------- */
+
+export const createCommentSchema = z.object({
+  body: z.string().min(1).max(10000),
+});
+export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+export const patchCommentSchema = z.object({
+  body: z.string().min(1).max(10000),
+});
+export type PatchCommentInput = z.infer<typeof patchCommentSchema>;
+
+export const createChecklistItemSchema = z.object({
+  text: z.string().min(1).max(500),
+  prevId: z.string().uuid().nullable().optional(),
+  nextId: z.string().uuid().nullable().optional(),
+});
+export type CreateChecklistItemInput = z.infer<typeof createChecklistItemSchema>;
+
+export const patchChecklistItemSchema = z
+  .object({
+    text: z.string().min(1).max(500).optional(),
+    done: z.boolean().optional(),
+    prevId: z.string().uuid().nullable().optional(),
+    nextId: z.string().uuid().nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, "no fields to update");
+export type PatchChecklistItemInput = z.infer<typeof patchChecklistItemSchema>;
+
+export const attachmentUploadRequestSchema = z.object({
+  fileName: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(200),
+  sizeBytes: z.number().int().min(0).max(5 * 1024 * 1024 * 1024), // 5 GB hard cap
+});
+export type AttachmentUploadRequest = z.infer<typeof attachmentUploadRequestSchema>;
+
+export const attachmentConfirmSchema = z.object({
+  attachmentId: z.string().uuid(),
+});
+export type AttachmentConfirmInput = z.infer<typeof attachmentConfirmSchema>;

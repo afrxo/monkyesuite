@@ -317,6 +317,92 @@ export interface Board {
   milestones: Milestone[];
 }
 
+/* ---------------------------- card detail modal --------------------------- */
+
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  authorId: string;
+  author: { id: string; name: string | null; email: string } | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskChecklistItem {
+  id: string;
+  taskId: string;
+  text: string;
+  done: boolean;
+  orderKey: string;
+  createdAt: string;
+}
+
+export interface TaskAttachment {
+  id: string;
+  taskId: string;
+  uploadedBy: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  // Grid thumbnail URL when the backend has one (images/video); null otherwise.
+  thumbnailUrl: string | null;
+  createdAt: string;
+}
+
+export type TaskActivityKind =
+  | "create"
+  | "status_change"
+  | "title_change"
+  | "assignee_change"
+  | "comment"
+  | "attachment"
+  | "checklist_add"
+  | "checklist_complete";
+
+export interface TaskActivityEvent {
+  id: string;
+  taskId: string;
+  actorId: string;
+  actor: { id: string; name: string | null; email: string } | null;
+  kind: TaskActivityKind;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+// One backlink note whose body mentions this card's short ID (e.g. "SG-010").
+export interface LinkedNote {
+  id: string;
+  title: string | null;
+  body: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Bundled fetch when the card modal opens — one round-trip.
+export interface TaskDetail {
+  task: Task;
+  comments: TaskComment[];
+  checklistItems: TaskChecklistItem[];
+  attachments: TaskAttachment[];
+  activity: TaskActivityEvent[];
+  linkedNotes: LinkedNote[];
+}
+
+// Response from the presigned-upload endpoint.
+export interface AttachmentUploadTicket {
+  attachmentId: string;
+  uploadUrl: string;
+  r2Key: string;
+  expiresInSeconds: number;
+}
+
+// Response for a per-attachment view/download URL.
+export interface AttachmentViewTicket {
+  url: string;
+  expiresInSeconds: number;
+}
+
 /* --------------------------- docs & project notes ------------------------- */
 
 export interface Doc {

@@ -5,8 +5,11 @@
 @import '@fontsource/inter-tight/400.css';
 @import '@fontsource/inter-tight/500.css';
 @import '@fontsource/inter-tight/600.css';
+@import '@fontsource/inter-tight/700.css';
 @import '@fontsource/instrument-serif/400.css';
 @import '@fontsource/instrument-serif/400-italic.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 @import 'tw-animate-css';
@@ -54,6 +57,21 @@
 
   --font-sans: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
   --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Warm amber accent — used for active milestone, note→card links,
+     save pulse, and other user-authored highlights. Deliberate second
+     accent (existing --primary is white) to signal user-owned state. */
+  --accent-warm: #d4a24c;
+  --accent-warm-soft: rgba(212, 162, 76, 0.14);
+
+  /* Semantic tag colors — data-driven; used by board card tag chips
+     and any future tag surfaces. Add a new key here to introduce one. */
+  --tag-combat: #f87171;
+  --tag-ui: #fbbf24;
+  --tag-audio: #86efac;
+  --tag-net: #93c5fd;
+  --tag-neutral: #a8a29e;
 
   /* shadcn token aliases — map to existing design system */
   --background: var(--surface-0);
@@ -133,7 +151,145 @@
 
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+
+  --color-accent-warm: var(--accent-warm);
+  --color-accent-warm-soft: var(--accent-warm-soft);
+  --color-tag-combat: var(--tag-combat);
+  --color-tag-ui: var(--tag-ui);
+  --color-tag-audio: var(--tag-audio);
+  --color-tag-net: var(--tag-net);
+  --color-tag-neutral: var(--tag-neutral);
 }
+
+/* Workspace-only patterns — three-pane suite view (specs/05 §5).
+   Kept in styles.css so the tokens live in one place. */
+@keyframes ws-save-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 162, 76, 0); }
+  50%      { box-shadow: 0 0 0 3px rgba(212, 162, 76, 0.35); }
+}
+.ws-save-dot { animation: ws-save-pulse 1.6s ease-in-out 1; }
+
+/* Card detail modal (specs/05 card modal). Pop on open, fade on close. */
+@keyframes cardOverlayFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes cardModalPop {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Applied to the workspace grid when the modal is open — the board dims and
+   loses interaction. */
+[data-card-modal-open="true"] {
+  filter: blur(2px) brightness(0.5);
+  pointer-events: none;
+  user-select: none;
+}
+
+.ws-note-link {
+  color: var(--accent-warm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-decoration: none;
+}
+.ws-note-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Add-affordance revealed on section hover / focus-within */
+.ws-section .ws-section-add { opacity: 0; transition: opacity 120ms ease; }
+.ws-section:hover .ws-section-add,
+.ws-section:focus-within .ws-section-add { opacity: 1; }
+
+/* Rendered markdown for doc-editor Preview mode. Marked → HTML gets styled
+   here rather than via Tailwind classes (marked can't attach classes without
+   a custom renderer). Sans for prose, mono for code/pre, accent-warm for
+   headings + inline code — mirrors the mockup. */
+.ws-doc-preview {
+  font-family: var(--font-sans);
+  color: var(--text-2);
+}
+.ws-doc-preview h1,
+.ws-doc-preview h2,
+.ws-doc-preview h3,
+.ws-doc-preview h4,
+.ws-doc-preview h5,
+.ws-doc-preview h6 {
+  color: var(--accent-warm);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin: 1.6em 0 0.5em;
+}
+.ws-doc-preview h1 { font-size: 26px; margin-top: 0; }
+.ws-doc-preview h2 { font-size: 20px; }
+.ws-doc-preview h3 { font-size: 16px; }
+.ws-doc-preview h4,
+.ws-doc-preview h5,
+.ws-doc-preview h6 { font-size: 14px; }
+.ws-doc-preview p { margin: 0.7em 0; }
+.ws-doc-preview strong { color: var(--text-1); font-weight: 600; }
+.ws-doc-preview em { font-style: italic; }
+.ws-doc-preview a { color: var(--accent-warm); text-decoration: underline; text-underline-offset: 2px; }
+.ws-doc-preview ul,
+.ws-doc-preview ol { margin: 0.6em 0; padding-left: 1.4em; }
+.ws-doc-preview ul { list-style: disc; }
+.ws-doc-preview ol { list-style: decimal; }
+.ws-doc-preview li { margin: 0.25em 0; }
+.ws-doc-preview li > p { margin: 0.15em 0; }
+.ws-doc-preview ul ul,
+.ws-doc-preview ul ol,
+.ws-doc-preview ol ul,
+.ws-doc-preview ol ol { margin: 0.15em 0; }
+.ws-doc-preview blockquote {
+  margin: 0.8em 0;
+  padding: 0.2em 0 0.2em 0.9em;
+  border-left: 2px solid var(--border-strong, var(--border-1));
+  color: var(--text-3);
+}
+.ws-doc-preview code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  color: var(--accent-warm);
+  background: var(--accent-warm-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.ws-doc-preview pre {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: 5px;
+  padding: 10px 12px;
+  margin: 0.8em 0;
+  overflow-x: auto;
+}
+.ws-doc-preview pre code {
+  color: var(--text-2);
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+.ws-doc-preview hr {
+  border: none;
+  border-top: 1px solid var(--border-1);
+  margin: 1.4em 0;
+}
+.ws-doc-preview table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 13px;
+}
+.ws-doc-preview th,
+.ws-doc-preview td {
+  border: 1px solid var(--border-1);
+  padding: 5px 10px;
+  text-align: left;
+}
+.ws-doc-preview th { background: var(--surface-1); color: var(--text-1); font-weight: 600; }
+.ws-doc-preview input[type="checkbox"] { margin-right: 6px; }
+.ws-doc-preview img { max-width: 100%; border-radius: 4px; }
 
 html,
 body,

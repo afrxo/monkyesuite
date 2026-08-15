@@ -25,6 +25,7 @@ import {
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { resolveItemAccess, resolveProjectAccess } from "./access.js";
+import { logActivity } from "./cards.js";
 import { notFound, validationError } from "./errors.js";
 import { toDisplayUsername } from "./identity.js";
 import { type AppEnv, requireUser } from "./middleware.js";
@@ -253,6 +254,12 @@ export function boardRoutes(): Hono<AppEnv> {
         })
         .returning({ id: tasks.id });
       if (!row) throw notFound("Task creation failed.");
+      await logActivity(tx, {
+        taskId: row.id,
+        projectId: id,
+        actorId: userId,
+        kind: "create",
+      });
       const join = await taskJoinById(tx, row.id);
       if (!join) throw notFound("Task creation failed.");
       return mapTask(join, []);
@@ -323,7 +330,12 @@ export function boardRoutes(): Hono<AppEnv> {
     if (!body.success) throw validationError("Invalid update.");
     const d = body.data;
     const task = await withUser(userId, async (tx): Promise<Task> => {
-      await resolveItemAccess(tx, "task", id, userId);
+      const { projectId } = await resolveItemAccess(tx, "task", id, userId);
+      const [before] = await tx
+        .select({ title: tasks.title, assigneeId: tasks.assigneeId })
+        .from(tasks)
+        .where(eq(tasks.id, id))
+        .limit(1);
       await tx
         .update(tasks)
         .set({
@@ -341,6 +353,29 @@ export function boardRoutes(): Hono<AppEnv> {
           updatedAt: new Date(),
         })
         .where(eq(tasks.id, id));
+      if (before) {
+        if (d.title !== undefined && d.title !== before.title) {
+          await logActivity(tx, {
+            taskId: id,
+            projectId,
+            actorId: userId,
+            kind: "title_change",
+            payload: { from: before.title, to: d.title },
+          });
+        }
+        if (
+          d.assigneeId !== undefined &&
+          d.assigneeId !== before.assigneeId
+        ) {
+          await logActivity(tx, {
+            taskId: id,
+            projectId,
+            actorId: userId,
+            kind: "assignee_change",
+            payload: { from: before.assigneeId, to: d.assigneeId },
+          });
+        }
+      }
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");
       // Return the parent's subtasks too, so an edited parent re-renders whole.
@@ -360,7 +395,7 @@ export function boardRoutes(): Hono<AppEnv> {
     const task = await withUser(userId, async (tx): Promise<Task> => {
       const { projectId } = await resolveItemAccess(tx, "task", id, userId);
       // Subtasks aren't board cards — they can't be moved across lanes.
-      await assertTopLevel(tx, id);
+      const current = await assertTopLevel(tx, id);
       const orderKey = await keyBetweenNeighbours(
         tx,
         projectId,
@@ -373,6 +408,15 @@ export function boardRoutes(): Hono<AppEnv> {
         .update(tasks)
         .set({ status, orderKey, updatedAt: new Date() })
         .where(eq(tasks.id, id));
+      if (current.status !== status) {
+        await logActivity(tx, {
+          taskId: id,
+          projectId,
+          actorId: userId,
+          kind: "status_change",
+          payload: { from: current.status, to: status },
+        });
+      }
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");
       return mapTask(join, await subtasksOf(tx, id));
