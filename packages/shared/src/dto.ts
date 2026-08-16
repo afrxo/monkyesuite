@@ -299,6 +299,7 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   dueAt: string | null;
+  coverUrl: string | null;
   // One level of subtasks only (specs/05 §5.1). Present on top-level cards.
   subtasks: Task[];
 }

@@ -7,6 +7,7 @@ import type { GameNote, NoteVisibility } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
+import { toastError } from "./Toast";
 import { api } from "../lib/api";
 import { useSession } from "../lib/auth";
 import { relTime } from "../lib/format";
@@ -73,6 +74,7 @@ function Compose({
       setBody("");
       onChanged();
     },
+    onError: (err) => toastError(err),
   });
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -124,6 +126,7 @@ function NoteRow({
   const del = useMutation({
     mutationFn: () => api.deleteNote(note.id),
     onSuccess: onChanged,
+    onError: (err) => toastError(err),
   });
   return (
     <li className="rounded-lg border border-border-1 bg-surface-1/40 p-3 text-sm">

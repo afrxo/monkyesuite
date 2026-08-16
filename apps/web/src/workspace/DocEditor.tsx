@@ -7,6 +7,7 @@ import type { Doc } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
 
@@ -75,6 +76,7 @@ function Editor({
       qc.setQueryData(["doc", doc.id], d);
       onSaved();
     },
+    onError: (err) => toastError(err, "Failed to save document."),
   });
 
   // Debounced autosave — 1s idle after last edit. Skip the first pass so
@@ -97,6 +99,7 @@ function Editor({
       qc.invalidateQueries({ queryKey: ["docs", projectId] });
       onExit();
     },
+    onError: (err) => toastError(err),
   });
 
   const words = body.trim() ? body.trim().split(/\s+/).length : 0;

@@ -28,8 +28,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { Icon } from "../components/Icon";
 import { copyLink } from "../lib/clipboard";
 import { api } from "../lib/api";
+import { toastError } from "../components/Toast";
 import { relTime } from "../lib/format";
 import { AttachmentViewer } from "./AttachmentViewer";
 import { shortTaskId } from "./short-id";
@@ -182,7 +184,7 @@ function Header({
           style={{ background: "var(--accent-warm)" }}
         />
         {STATUS_LABEL[status]}
-        <span className="text-[9px] text-text-disabled">▾</span>
+        <Icon name="chevron-down" size={9} className="text-text-disabled" />
       </span>
       <div className="flex-1" />
       <button
@@ -190,26 +192,26 @@ function Header({
         onClick={copyCardLink}
         title="Copy link"
         aria-label={`Copy link to ${shortId}`}
-        className="rounded-[3px] px-1.5 py-1 text-sm leading-none text-text-disabled hover:bg-surface-hover hover:text-text-1"
+        className="grid h-6 w-6 place-items-center rounded-[3px] text-text-disabled hover:bg-surface-hover hover:text-text-1"
       >
-        ↗
+        <Icon name="link" size={13} />
       </button>
       <button
         type="button"
         title="More"
         aria-label={`More actions for ${taskId}`}
-        className="rounded-[3px] px-1.5 py-1 text-sm leading-none text-text-disabled hover:bg-surface-hover hover:text-text-1"
+        className="grid h-6 w-6 place-items-center rounded-[3px] text-text-disabled hover:bg-surface-hover hover:text-text-1"
       >
-        ⋯
+        <Icon name="more" size={14} />
       </button>
       <button
         type="button"
         onClick={onClose}
         title="Close"
         aria-label="Close card"
-        className="flex items-center gap-1 rounded-[3px] px-1.5 py-1 text-sm leading-none text-text-disabled hover:bg-surface-hover hover:text-text-1"
+        className="flex items-center gap-1 rounded-[3px] px-1.5 py-1 text-text-disabled hover:bg-surface-hover hover:text-text-1"
       >
-        ✕
+        <Icon name="x" size={12} />
         <span className="rounded-[3px] border border-border-1 px-1 py-px font-mono text-[10px] text-text-disabled">
           Esc
         </span>
@@ -267,6 +269,7 @@ function TitleField({
   const save = useMutation({
     mutationFn: (v: string) => api.patchTask(task.id, { title: v }),
     onSuccess: onSaved,
+    onError: (err) => toastError(err),
   });
   const commit = () => {
     const v = value.trim();
@@ -305,6 +308,7 @@ function DescriptionField({
   const save = useMutation({
     mutationFn: (v: string) => api.patchTask(task.id, { body: v || null }),
     onSuccess: onSaved,
+    onError: (err) => toastError(err),
   });
 
   const scheduleSave = (v: string) => {
@@ -446,14 +450,17 @@ function ChecklistRow({
   const toggle = useMutation({
     mutationFn: () => api.patchChecklistItem(item.id, { done: !item.done }),
     onSuccess: onChanged,
+    onError: (err) => toastError(err),
   });
   const rename = useMutation({
     mutationFn: (v: string) => api.patchChecklistItem(item.id, { text: v }),
     onSuccess: onChanged,
+    onError: (err) => toastError(err),
   });
   const del = useMutation({
     mutationFn: () => api.deleteChecklistItem(item.id),
     onSuccess: onChanged,
+    onError: (err) => toastError(err),
   });
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: row layout with two actionable areas (checkbox + text)
@@ -472,7 +479,7 @@ function ChecklistRow({
           color: item.done ? "#1a1000" : "transparent",
         }}
       >
-        ✓
+        <Icon name="check" size={9} />
       </button>
       {editing ? (
         <input
@@ -512,9 +519,9 @@ function ChecklistRow({
         type="button"
         onClick={() => del.mutate()}
         aria-label="Delete item"
-        className="opacity-0 transition group-hover:opacity-100 text-[11px] text-text-disabled hover:text-destructive"
+        className="grid h-4 w-4 place-items-center rounded opacity-0 transition group-hover:opacity-100 text-text-disabled hover:text-destructive"
       >
-        ✕
+        <Icon name="x" size={10} />
       </button>
     </div>
   );
@@ -536,6 +543,7 @@ function AddChecklistRow({
       setValue("");
       onDone();
     },
+    onError: (err) => toastError(err),
   });
   return (
     <form
@@ -602,6 +610,15 @@ function AttachmentsSection({
       });
     },
     onSuccess: onChanged,
+    onError: (err) =>
+      toastError(err, "Upload failed. Check your connection and try again."),
+  });
+
+  const setCover = useMutation({
+    mutationFn: (id: string | null) =>
+      api.patchTask(taskId, { coverAttachmentId: id }),
+    onSuccess: onChanged,
+    onError: (err) => toastError(err),
   });
 
   const onPick = (e: ChangeEvent<HTMLInputElement>) => {
@@ -614,22 +631,33 @@ function AttachmentsSection({
     <Section title="Attachments" count={String(attachments.length)}>
       <div className="grid grid-cols-3 gap-2">
         {attachments.map((a, i) => (
-          <button
-            key={a.id}
-            type="button"
-            onClick={() => onOpenViewer(i)}
-            className="flex items-center gap-2.5 rounded-[5px] border border-border-1 bg-surface-1 p-2.5 text-left hover:border-border-2 hover:bg-white/[0.03]"
-          >
-            <AttachmentTile attachment={a} />
-            <div className="min-w-0">
-              <div className="truncate text-[11px] text-text-1">
-                {a.fileName}
+          <div key={a.id} className="group/att relative">
+            <button
+              type="button"
+              onClick={() => onOpenViewer(i)}
+              className="flex w-full items-center gap-2.5 rounded-[5px] border border-border-1 bg-surface-1 p-2.5 text-left hover:border-border-2 hover:bg-white/[0.03]"
+            >
+              <AttachmentTile attachment={a} />
+              <div className="min-w-0">
+                <div className="truncate text-[11px] text-text-1">
+                  {a.fileName}
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-text-disabled">
+                  {fmtSize(a.sizeBytes)}
+                </div>
               </div>
-              <div className="mt-0.5 font-mono text-[10px] text-text-disabled">
-                {fmtSize(a.sizeBytes)}
-              </div>
-            </div>
-          </button>
+            </button>
+            {a.mimeType.startsWith("image/") ? (
+              <button
+                type="button"
+                onClick={() => setCover.mutate(a.id)}
+                title="Set as card cover"
+                className="absolute right-1 top-1 hidden rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white/80 hover:bg-black/80 group-hover/att:flex"
+              >
+                cover
+              </button>
+            ) : null}
+          </div>
         ))}
         <button
           type="button"
@@ -693,6 +721,7 @@ function CommentsSection({
       setBody("");
       onChanged();
     },
+    onError: (err) => toastError(err),
   });
   const submit = () => {
     const v = body.trim();
@@ -783,40 +812,27 @@ function SideColumn({
 }) {
   void taskId;
   const t = detail.task;
-  const milestone = milestones.find((m) => m.id === t.milestoneId) ?? null;
   const setMilestone = useMutation({
     mutationFn: (id: string | null) =>
       api.patchTask(t.id, { milestoneId: id }),
     onSuccess: invalidate,
+    onError: (err) => toastError(err),
   });
   const setDue = useMutation({
     mutationFn: (iso: string | null) => api.patchTask(t.id, { dueAt: iso }),
     onSuccess: invalidate,
+    onError: (err) => toastError(err),
   });
 
   return (
     <>
       <Prop label="Milestone">
-        <select
-          value={t.milestoneId ?? ""}
-          onChange={(e) => setMilestone.mutate(e.target.value || null)}
-          className="cursor-pointer rounded bg-transparent px-1.5 py-0.5 text-[12px] text-text-1 outline-none hover:bg-surface-hover"
-        >
-          <option value="">— none —</option>
-          {milestones.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-            </option>
-          ))}
-        </select>
-        {milestone ? (
-          <span
-            className="ml-1 text-[10px]"
-            style={{ color: "var(--accent-warm)" }}
-          >
-            ●
-          </span>
-        ) : null}
+        <MilestonePicker
+          milestones={milestones}
+          value={t.milestoneId ?? null}
+          onChange={(id) => setMilestone.mutate(id)}
+          pending={setMilestone.isPending}
+        />
       </Prop>
 
       <Prop label="Assignee">
@@ -969,6 +985,100 @@ function Section({
       </div>
       {children}
     </section>
+  );
+}
+
+function MilestonePicker({
+  milestones,
+  value,
+  onChange,
+  pending,
+}: {
+  milestones: Milestone[];
+  value: string | null;
+  onChange: (id: string | null) => void;
+  pending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const selected = milestones.find((m) => m.id === value) ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) =>
+      e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={pending}
+        className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] transition-colors hover:bg-surface-hover disabled:opacity-50 ${
+          selected ? "text-text-1" : "text-text-3"
+        }`}
+      >
+        {selected ? (
+          <>
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
+            {selected.name}
+          </>
+        ) : (
+          "— none —"
+        )}
+        <Icon name="chevron-down" size={9} className="ml-0.5 text-text-disabled" />
+      </button>
+
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+4px)] z-30 w-52 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-xl">
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
+            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
+              value === null ? "text-text-1" : "text-text-3"
+            }`}
+          >
+            <span className="text-[9px] text-text-disabled opacity-0">●</span>
+            — none —
+            {value === null ? (
+              <span className="ml-auto"><Icon name="check" size={10} className="text-text-disabled" /></span>
+            ) : null}
+          </button>
+          {milestones.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => {
+                onChange(m.id);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
+                value === m.id ? "text-text-1" : "text-text-3"
+              }`}
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
+              <span className="truncate">{m.name}</span>
+              {value === m.id ? (
+                <span className="ml-auto"><Icon name="check" size={10} className="text-text-disabled" /></span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -8,6 +8,8 @@
 import type { CreateNoteInput, ProjectNote } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "../components/Icon";
+import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
 import { extractTaskRefs } from "./short-id";
@@ -26,7 +28,7 @@ export function NotesRail({ projectId, onOpenCard }: Props) {
       <div className="flex border-b border-border-1 px-2">
         <Tab active={tab === "notes"} onClick={() => setTab("notes")}>
           Notes
-          <span className="ml-1 font-mono text-[10px] text-text-disabled">
+          <span className="ml-1 font-mono text-xs text-text-disabled">
             {notes.data?.length ?? 0}
           </span>
         </Tab>
@@ -34,7 +36,7 @@ export function NotesRail({ projectId, onOpenCard }: Props) {
           Activity
         </Tab>
       </div>
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="flex-1 overflow-y-auto p-4">
         {tab === "notes" ? (
           <NotesTab
             projectId={projectId}
@@ -63,7 +65,7 @@ function Tab({
     <button
       type="button"
       onClick={onClick}
-      className={`-mb-px cursor-pointer border-b px-2.5 py-2.5 text-[11px] transition ${
+      className={`-mb-px cursor-pointer border-b px-3 py-3 text-xs transition-colors ${
         active
           ? "border-text-1 text-text-1"
           : "border-transparent text-text-3 hover:text-text-1"
@@ -93,10 +95,12 @@ function NotesTab({
     mutationFn: (input: CreateNoteInput) =>
       api.createProjectNote(projectId, input),
     onSuccess: invalidate,
+    onError: (err) => toastError(err),
   });
   const del = useMutation({
     mutationFn: (id: string) => api.deleteProjectNote(id),
     onSuccess: invalidate,
+    onError: (err) => toastError(err),
   });
 
   return (
@@ -158,7 +162,7 @@ function QuickCapture({
   };
 
   return (
-    <div className="mb-3 rounded-[5px] border border-border-1 bg-surface-1 p-2.5">
+    <div className="mb-4 rounded-md border border-border-1 bg-surface-1 p-3">
       <textarea
         ref={ref}
         value={body}
@@ -170,9 +174,9 @@ function QuickCapture({
           }
         }}
         placeholder="Quick observation, dated call, or reminder…"
-        className="min-h-9 w-full resize-none bg-transparent text-xs text-text-1 outline-none placeholder:text-text-disabled"
+        className="min-h-10 w-full resize-none bg-transparent text-sm text-text-1 outline-none placeholder:text-text-disabled"
       />
-      <div className="mt-1.5 flex items-center gap-2 border-t border-border-1 pt-1.5">
+      <div className="mt-2 flex items-center gap-2 border-t border-border-1 pt-2">
         {showContext ? (
           <input
             // biome-ignore lint/a11y/noAutofocus: focus what user opened
@@ -196,7 +200,7 @@ function QuickCapture({
           type="button"
           onClick={submit}
           disabled={pending}
-          className="rounded bg-neutral-100 px-2.5 py-0.5 text-[11px] font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+          className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-900 hover:bg-white disabled:opacity-50 transition-colors"
         >
           Pin
         </button>
@@ -216,25 +220,25 @@ function NoteItem({
 }) {
   const refs = extractTaskRefs(note.body ?? "");
   return (
-    <li className="border-b border-border-1 py-2.5 last:border-b-0">
-      <div className="mb-1 flex items-baseline gap-2">
+    <li className="border-b border-border-1 py-3 last:border-b-0">
+      <div className="mb-1.5 flex items-baseline gap-2">
         {note.title ? (
-          <span className="text-xs font-medium text-text-1">{note.title}</span>
+          <span className="text-sm font-medium text-text-1">{note.title}</span>
         ) : null}
-        <span className="ml-auto font-mono text-[10px] text-text-disabled">
+        <span className="ml-auto font-mono text-xs text-text-disabled">
           {relTime(note.createdAt)}
         </span>
         <button
           type="button"
           onClick={onDelete}
-          className="text-[10px] text-text-disabled hover:text-rose-300"
+          className="grid h-5 w-5 place-items-center rounded text-text-disabled hover:text-rose-300 transition-colors"
           title="Delete note"
         >
-          ✕
+          <Icon name="x" size={11} />
         </button>
       </div>
       {note.body ? (
-        <p className="whitespace-pre-wrap text-xs leading-[1.5] text-text-3">
+        <p className="whitespace-pre-wrap text-sm leading-[1.5] text-text-3">
           {note.body}
         </p>
       ) : null}

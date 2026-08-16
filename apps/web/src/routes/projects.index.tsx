@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { ScopedError } from "../components/scoped";
+import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 
 export const Route = createFileRoute("/projects/")({
@@ -92,6 +93,7 @@ function NewProject() {
       setName("");
       setOpen(false);
     },
+    onError: (err) => toastError(err),
   });
 
   if (!open) {

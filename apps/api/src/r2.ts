@@ -104,3 +104,12 @@ export function thumbnailUrlFor(
   // /cdn-cgi/image/width=160,height=160,fit=cover/<origin>/<key>
   return `${base.replace(/\/$/, "")}/cdn-cgi/image/width=160,height=160,fit=cover/${key}`;
 }
+
+// Cover image URL for card covers (wider crop). Only images are eligible;
+// requires R2_PUBLIC_URL_BASE to be set (same as thumbnails).
+export function coverUrlFor(mimeType: string, key: string): string | null {
+  const base = process.env.R2_PUBLIC_URL_BASE;
+  if (!base) return null;
+  if (!mimeType.startsWith("image/")) return null;
+  return `${base.replace(/\/$/, "")}/cdn-cgi/image/width=900,height=280,fit=cover,gravity=auto/${key}`;
+}

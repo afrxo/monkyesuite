@@ -131,6 +131,7 @@ export const patchTaskSchema = z
     assigneeId: z.string().nullable().optional(),
     universeId: universeLink.optional(),
     dueAt: z.string().datetime().nullable().optional(),
+    coverAttachmentId: z.string().uuid().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, "no fields to update");
 export type PatchTaskInput = z.infer<typeof patchTaskSchema>;

@@ -12,7 +12,7 @@ import type {
   Task,
   TaskStatus,
 } from "@monkyesuite/shared";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   type DragEvent,
   type FormEvent,
@@ -22,6 +22,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { Icon } from "../components/Icon";
+import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { shortTaskId } from "./short-id";
 import { TAG_CHIP, tagFromTitle } from "./tag";
@@ -32,8 +34,6 @@ const VISIBLE_LANES: TaskStatus[] = [
   "in_progress",
   "review",
 ];
-// Archived lane is opt-in — appended when the header toggle is on. Done lives
-// in the schema but has no dedicated column yet; treat as archived-adjacent.
 const LANE_LABEL: Record<TaskStatus, string> = {
   backlog: "Backlog",
   todo: "To Do",
@@ -60,10 +60,67 @@ type Props = {
   onOpenCard?: (taskId: string) => void;
 };
 
+// --- optimistic helpers ---
+
+function optimisticallyMoveTask(
+  board: Board,
+  taskId: string,
+  newStatus: TaskStatus,
+  nextId: string | null,
+): Board {
+  let task: Task | undefined;
+  const withoutTask = board.lanes.map((lane) => {
+    const found = lane.tasks.find((t) => t.id === taskId);
+    if (!found) return lane;
+    task = { ...found, status: newStatus };
+    return { ...lane, tasks: lane.tasks.filter((t) => t.id !== taskId) };
+  });
+  if (!task) return board;
+  return {
+    ...board,
+    lanes: withoutTask.map((lane) => {
+      if (lane.status !== newStatus) return lane;
+      const tasks = [...lane.tasks];
+      if (nextId) {
+        const idx = tasks.findIndex((t) => t.id === nextId);
+        tasks.splice(idx === -1 ? tasks.length : idx, 0, task!);
+      } else {
+        tasks.push(task!);
+      }
+      return { ...lane, tasks };
+    }),
+  };
+}
+
+function optimisticallyReorderTask(
+  board: Board,
+  taskId: string,
+  nextId: string | null,
+): Board {
+  return {
+    ...board,
+    lanes: board.lanes.map((lane) => {
+      const idx = lane.tasks.findIndex((t) => t.id === taskId);
+      if (idx === -1) return lane;
+      const task = lane.tasks[idx];
+      if (!task) return lane;
+      const without = lane.tasks.filter((t) => t.id !== taskId);
+      if (nextId) {
+        const ni = without.findIndex((t) => t.id === nextId);
+        without.splice(ni === -1 ? without.length : ni, 0, task);
+      } else {
+        without.push(task);
+      }
+      return { ...lane, tasks: without };
+    }),
+  };
+}
+
 export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
   { projectId, projectSlug, board, milestoneFilter, onChanged, onOpenCard },
   ref,
 ) {
+  const qc = useQueryClient();
   const [drag, setDrag] = useState<Drag | null>(null);
   const [view, setView] = useState<"board" | "list" | "timeline">("board");
   const [query, setQuery] = useState("");
@@ -94,14 +151,41 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
         prevId: v.prevId,
         nextId: v.nextId,
       }),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ["board", projectId] });
+      const snapshot = qc.getQueryData<Board>(["board", projectId]);
+      qc.setQueryData<Board>(["board", projectId], (old) =>
+        old ? optimisticallyMoveTask(old, v.taskId, v.status, v.nextId) : old,
+      );
+      return { snapshot };
+    },
+    onError: (err, _v, ctx) => {
+      if (ctx?.snapshot)
+        qc.setQueryData(["board", projectId], ctx.snapshot);
+      toastError(err, "Failed to move card.");
+    },
     onSettled: onChanged,
   });
+
   const reorder = useMutation({
     mutationFn: (v: {
       taskId: string;
       prevId: string | null;
       nextId: string | null;
     }) => api.reorderTask(v.taskId, { prevId: v.prevId, nextId: v.nextId }),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ["board", projectId] });
+      const snapshot = qc.getQueryData<Board>(["board", projectId]);
+      qc.setQueryData<Board>(["board", projectId], (old) =>
+        old ? optimisticallyReorderTask(old, v.taskId, v.nextId) : old,
+      );
+      return { snapshot };
+    },
+    onError: (err, _v, ctx) => {
+      if (ctx?.snapshot)
+        qc.setQueryData(["board", projectId], ctx.snapshot);
+      toastError(err, "Failed to reorder card.");
+    },
     onSettled: onChanged,
   });
 
@@ -139,7 +223,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <div className="flex items-center gap-3 border-b border-border-1 bg-surface-0 px-4 py-2.5">
+      <div className="flex items-center gap-3 border-b border-border-1 bg-surface-0 px-5 py-3">
         <div className="flex gap-0.5">
           <ViewTab active={view === "board"} onClick={() => setView("board")}>
             Board
@@ -165,7 +249,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
         <button
           type="button"
           onClick={() => setShowArchived((v) => !v)}
-          className={`rounded border px-2.5 py-1 text-[11px] transition ${
+          className={`rounded border px-3 py-1.5 text-xs transition-colors ${
             showArchived
               ? "border-border-2 bg-white/[0.05] text-text-1"
               : "border-border-2 text-text-3 hover:text-text-1"
@@ -173,12 +257,12 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
           title="Toggle archived lane"
         >
           Archived
-          <span className="ml-1.5 font-mono text-[10px] text-text-disabled">
+          <span className="ml-1.5 font-mono text-[11px] text-text-disabled">
             {archivedCount}
           </span>
         </button>
-        <label className="hidden w-52 items-center gap-2 rounded border border-border-1 bg-surface-1 px-2 py-1 text-[11px] text-text-3 sm:flex">
-          <span className="text-text-disabled">⌕</span>
+        <label className="hidden w-60 items-center gap-2 rounded border border-border-1 bg-surface-1 px-2.5 py-1.5 text-xs text-text-3 sm:flex">
+          <Icon name="search" size={14} className="shrink-0 text-text-disabled" />
           <input
             ref={searchRef}
             value={query}
@@ -187,9 +271,9 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
               if (e.key === "Escape") setQuery("");
             }}
             placeholder="Filter cards…"
-            className="flex-1 bg-transparent text-[11px] text-text-1 outline-none placeholder:text-text-disabled"
+            className="flex-1 bg-transparent text-xs text-text-1 outline-none placeholder:text-text-disabled"
           />
-          <span className="rounded border border-border-1 px-1.5 py-px font-mono text-[10px] text-text-disabled">
+          <span className="rounded border border-border-1 px-1.5 py-px font-mono text-[11px] text-text-disabled">
             ⌘K
           </span>
         </label>
@@ -216,6 +300,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
                 <Card
                   key={task.id}
                   task={task}
+                  projectId={projectId}
                   projectSlug={projectSlug}
                   milestoneName={
                     milestoneFilter === "all" && task.milestoneId
@@ -265,7 +350,7 @@ function ViewTab({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`rounded px-2.5 py-1 text-xs transition ${
+      className={`rounded px-3 py-1.5 text-sm transition-colors ${
         active
           ? "bg-white/[0.06] text-text-1"
           : disabled
@@ -295,7 +380,7 @@ function Lane({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drag-drop lane target
     <div
-      className={`flex min-h-0 flex-col bg-[#0c0c0c] ${
+      className={`flex min-h-0 flex-col bg-[#0c0c0c] transition-shadow ${
         over ? "ring-1 ring-inset ring-text-5" : ""
       }`}
       onDragOver={(e) => {
@@ -309,23 +394,23 @@ function Lane({
         onDropEnd();
       }}
     >
-      <div className="flex items-center gap-2 border-b border-border-1 px-3.5 py-2.5">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-3">
+      <div className="flex items-center gap-2 border-b border-border-1 px-4 py-3">
+        <span className="text-xs font-semibold uppercase tracking-[0.1em] text-text-3">
           {LANE_LABEL[status]}
         </span>
-        <span className="font-mono text-[10px] text-text-disabled">
+        <span className="font-mono text-[11px] text-text-disabled">
           {count}
         </span>
         <button
           type="button"
           onClick={onAdd}
           aria-label={`Add card to ${LANE_LABEL[status]}`}
-          className="ml-auto cursor-pointer text-sm leading-none text-text-disabled hover:text-text-1"
+          className="ml-auto grid h-5 w-5 cursor-pointer place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors"
         >
-          +
+          <Icon name="plus" size={13} />
         </button>
       </div>
-      <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto p-2">
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2.5">
         {children}
       </div>
     </div>
@@ -334,6 +419,7 @@ function Lane({
 
 function Card({
   task,
+  projectId,
   projectSlug,
   milestoneName,
   onDragStart,
@@ -342,6 +428,7 @@ function Card({
   onOpen,
 }: {
   task: Task;
+  projectId: string;
   projectSlug: string;
   milestoneName: string | null;
   onDragStart: () => void;
@@ -370,7 +457,6 @@ function Card({
         onDragStart();
       }}
       onDragEnd={() => {
-        // Reset next tick so the trailing click after a drag is still suppressed.
         setTimeout(() => {
           draggedRef.current = false;
         }, 0);
@@ -379,19 +465,29 @@ function Card({
       onDrop={handleDrop}
       onClick={(e) => {
         if (draggedRef.current) return;
-        // Ignore clicks on nested interactive elements (card menu, etc.)
         const target = e.target as HTMLElement;
         if (target.closest("button")) return;
         onOpen?.();
       }}
-      className="group relative cursor-pointer rounded-[5px] border border-border-1 bg-surface-1 p-2.5 text-xs leading-[1.4] hover:border-border-2 hover:bg-white/[0.03] active:cursor-grabbing"
+      className="group relative cursor-pointer overflow-hidden rounded-md border border-border-1 bg-surface-1 text-sm leading-[1.4] hover:border-border-2 hover:bg-white/[0.03] active:scale-[0.99] transition-all duration-100 active:cursor-grabbing"
     >
-      <div className="mb-1.5 pr-5 text-text-1">{task.title}</div>
-      <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-text-disabled">
+      {task.coverUrl ? (
+        <div className="h-[112px] w-full overflow-hidden bg-surface-hover">
+          <img
+            src={task.coverUrl}
+            alt=""
+            className="h-full w-full object-cover"
+            draggable={false}
+          />
+        </div>
+      ) : null}
+      <div className="p-3">
+      <div className="mb-2 pr-5 text-text-1">{task.title}</div>
+      <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-text-disabled">
         <span>{id}</span>
         {tag ? (
           <span
-            className={`rounded-[8px] px-1.5 py-px text-[9px] tracking-[0.04em] ${TAG_CHIP[tag]}`}
+            className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${TAG_CHIP[tag]}`}
           >
             {tag}
           </span>
@@ -399,7 +495,7 @@ function Card({
         {milestoneName ? (
           <span
             title={`Milestone: ${milestoneName}`}
-            className="rounded-[8px] bg-accent-warm-soft px-1.5 py-px text-[9px] tracking-[0.04em] text-accent-warm"
+            className="rounded-[8px] bg-accent-warm-soft px-1.5 py-px text-[10px] tracking-[0.04em] text-accent-warm"
           >
             {milestoneName}
           </span>
@@ -410,35 +506,84 @@ function Card({
           </span>
         ) : null}
       </div>
-      <CardMenu task={task} onChanged={onChanged} />
+      <CardMenu task={task} projectId={projectId} onChanged={onChanged} />
+      </div>
     </div>
   );
 }
 
-function CardMenu({ task, onChanged }: { task: Task; onChanged: () => void }) {
+function CardMenu({
+  task,
+  projectId,
+  onChanged,
+}: {
+  task: Task;
+  projectId: string;
+  onChanged: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const qc = useQueryClient();
 
   const archive = useMutation({
     mutationFn: () => api.moveTask(task.id, { status: "archived" }),
-    onSettled: () => {
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["board", projectId] });
+      const snapshot = qc.getQueryData<Board>(["board", projectId]);
+      qc.setQueryData<Board>(["board", projectId], (old) =>
+        old ? optimisticallyMoveTask(old, task.id, "archived", null) : old,
+      );
       setOpen(false);
-      onChanged();
+      return { snapshot };
     },
+    onError: (err, _v, ctx) => {
+      if (ctx?.snapshot) qc.setQueryData(["board", projectId], ctx.snapshot);
+      toastError(err, "Failed to archive card.");
+    },
+    onSettled: onChanged,
   });
+
   const restore = useMutation({
     mutationFn: () => api.moveTask(task.id, { status: "backlog" }),
-    onSettled: () => {
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["board", projectId] });
+      const snapshot = qc.getQueryData<Board>(["board", projectId]);
+      qc.setQueryData<Board>(["board", projectId], (old) =>
+        old ? optimisticallyMoveTask(old, task.id, "backlog", null) : old,
+      );
       setOpen(false);
-      onChanged();
+      return { snapshot };
     },
+    onError: (err, _v, ctx) => {
+      if (ctx?.snapshot) qc.setQueryData(["board", projectId], ctx.snapshot);
+      toastError(err, "Failed to restore card.");
+    },
+    onSettled: onChanged,
   });
+
   const del = useMutation({
     mutationFn: () => api.deleteTask(task.id),
-    onSettled: () => {
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["board", projectId] });
+      const snapshot = qc.getQueryData<Board>(["board", projectId]);
+      qc.setQueryData<Board>(["board", projectId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          lanes: old.lanes.map((lane) => ({
+            ...lane,
+            tasks: lane.tasks.filter((t) => t.id !== task.id),
+          })),
+        };
+      });
       setOpen(false);
-      onChanged();
+      return { snapshot };
     },
+    onError: (err, _v, ctx) => {
+      if (ctx?.snapshot) qc.setQueryData(["board", projectId], ctx.snapshot);
+      toastError(err, "Failed to delete card.");
+    },
+    onSettled: onChanged,
   });
 
   useEffect(() => {
@@ -458,7 +603,7 @@ function CardMenu({ task, onChanged }: { task: Task; onChanged: () => void }) {
   const isArchived = task.status === "archived";
 
   return (
-    <div ref={wrapRef} className="absolute right-1 top-1">
+    <div ref={wrapRef} className="absolute right-1.5 top-1.5">
       <button
         type="button"
         onClick={(e) => {
@@ -467,16 +612,16 @@ function CardMenu({ task, onChanged }: { task: Task; onChanged: () => void }) {
         }}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label="Card actions"
-        className={`grid h-5 w-5 place-items-center rounded text-text-disabled transition ${
+        className={`grid h-6 w-6 place-items-center rounded text-text-disabled transition-colors ${
           open
             ? "bg-white/[0.06] text-text-1 opacity-100"
             : "opacity-0 hover:bg-white/[0.06] hover:text-text-1 group-hover:opacity-100 focus:opacity-100"
         }`}
       >
-        ⋯
+        <Icon name="more" size={14} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-6 z-10 w-36 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
+        <div className="absolute right-0 top-7 z-10 w-40 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
           {isArchived ? (
             <MenuItem onClick={() => restore.mutate()}>
               Restore to Backlog
@@ -487,7 +632,7 @@ function CardMenu({ task, onChanged }: { task: Task; onChanged: () => void }) {
           <MenuItem
             danger
             onClick={() => {
-              if (confirm(`Delete card “${task.title}”? This can't be undone.`))
+              if (confirm(`Delete card "${task.title}"? This can't be undone.`))
                 del.mutate();
             }}
           >
@@ -515,7 +660,7 @@ function MenuItem({
         e.stopPropagation();
         onClick();
       }}
-      className={`block w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/[0.05] ${
+      className={`block w-full px-3 py-2 text-left text-xs hover:bg-white/[0.05] transition-colors ${
         danger ? "text-destructive" : "text-text-2"
       }`}
     >
@@ -535,7 +680,7 @@ function MiniAvatar({ name }: { name: string }) {
   return (
     <span
       title={name}
-      className="grid h-4 w-4 place-items-center rounded-full border-[1.5px] border-surface-0 bg-gradient-to-br from-[#3a2a1a] to-accent-warm text-[8px] font-semibold text-[#1a1000]"
+      className="grid h-5 w-5 place-items-center rounded-full border-[1.5px] border-surface-0 bg-gradient-to-br from-[#3a2a1a] to-accent-warm text-[9px] font-semibold text-[#1a1000]"
     >
       {initials}
     </span>
@@ -583,7 +728,7 @@ function NewTask({
       <button
         type="button"
         onClick={onOpen}
-        className="cursor-pointer px-2.5 py-1.5 text-left text-[11px] text-text-disabled hover:text-text-3"
+        className="cursor-pointer px-3 py-2 text-left text-xs text-text-disabled hover:text-text-3 transition-colors"
       >
         + New card
       </button>
@@ -606,7 +751,7 @@ function NewTask({
           }
         }}
         placeholder="Card title"
-        className="w-full rounded border border-dashed border-border-1 bg-transparent px-2 py-1.5 text-xs text-text-1 outline-none focus:border-text-5"
+        className="w-full rounded border border-dashed border-border-1 bg-transparent px-2.5 py-2 text-sm text-text-1 outline-none focus:border-text-5"
       />
     </form>
   );

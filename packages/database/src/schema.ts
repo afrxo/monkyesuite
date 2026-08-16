@@ -1033,6 +1033,9 @@ export const tasks = pgTable(
       .notNull()
       .defaultNow(),
     dueAt: timestamp("due_at", { withTimezone: true }),
+    // Cover image: references a task_attachment id (no FK — avoids circular
+    // dependency with task_attachments which already references tasks).
+    coverAttachmentId: uuid("cover_attachment_id"),
   },
   (t) => [
     index("tasks_project_idx").on(t.projectId),

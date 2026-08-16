@@ -368,6 +368,7 @@ export function cardRoutes(): Hono<AppEnv> {
           createdAt: isoReq(taskRow.createdAt),
           updatedAt: isoReq(taskRow.updatedAt),
           dueAt: iso(taskRow.dueAt),
+          coverUrl: null,
           subtasks: [],
         },
         comments: commentRows.map(mapComment),

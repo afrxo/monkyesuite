@@ -133,7 +133,7 @@ function WorkspacePage() {
         style={{
           // Fill viewport below the 56px sticky AppHeader.
           height: "calc(100vh - 56px)",
-          gridTemplateColumns: "220px 1fr 320px",
+          gridTemplateColumns: "260px 1fr 360px",
         }}
       >
         {/* Left rail — desktop */}

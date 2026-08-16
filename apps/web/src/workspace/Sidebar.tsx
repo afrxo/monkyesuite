@@ -15,6 +15,8 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { Icon } from "../components/Icon";
+import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { TAG_KEYS } from "./tag";
 
@@ -36,7 +38,7 @@ export function Sidebar({
   onCreateDoc,
 }: Props) {
   return (
-    <aside className="col-start-1 overflow-y-auto border-r border-border-1 px-2.5 py-3.5">
+    <aside className="col-start-1 overflow-y-auto border-r border-border-1 px-3 py-4">
       <MilestoneSection
         projectId={projectId}
         active={activeMilestone}
@@ -56,8 +58,8 @@ export function Sidebar({
 
 function SectionHead({ label, onAdd }: { label: string; onAdd?: () => void }) {
   return (
-    <div className="flex items-center justify-between px-1.5 py-1">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
+    <div className="flex items-center justify-between px-2 py-1.5">
+      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-text-disabled">
         {label}
       </span>
       {onAdd ? (
@@ -65,9 +67,9 @@ function SectionHead({ label, onAdd }: { label: string; onAdd?: () => void }) {
           type="button"
           onClick={onAdd}
           aria-label={`Add ${label}`}
-          className="ws-section-add px-1 text-sm leading-none text-text-disabled hover:text-text-1"
+          className="ws-section-add grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors"
         >
-          +
+          <Icon name="plus" size={12} />
         </button>
       ) : null}
     </div>
@@ -94,18 +96,18 @@ function Item({
       type="button"
       onClick={onClick}
       title={title}
-      className={`flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs ${
+      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${
         active
           ? "bg-white/[0.05] text-text-1"
           : "text-text-3 hover:bg-white/[0.04] hover:text-text-1"
       }`}
     >
-      <span className="grid h-3.5 w-3.5 place-items-center text-[11px] text-text-disabled">
+      <span className="grid h-4 w-4 place-items-center text-xs text-text-disabled">
         {glyph}
       </span>
       <span className="truncate">{children}</span>
       {count !== undefined ? (
-        <span className="ml-auto font-mono text-[10px] text-text-disabled">
+        <span className="ml-auto font-mono text-[11px] text-text-disabled">
           {count}
         </span>
       ) : null}
@@ -148,7 +150,7 @@ function ItemWithMenu({
   return (
     <div
       ref={wrapRef}
-      className={`group relative flex w-full items-center gap-2 rounded px-1.5 py-1 text-xs ${
+      className={`group relative flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
         active
           ? "bg-white/[0.05] text-text-1"
           : "text-text-3 hover:bg-white/[0.04] hover:text-text-1"
@@ -159,13 +161,13 @@ function ItemWithMenu({
         onClick={onClick}
         className="flex flex-1 items-center gap-2 truncate text-left"
       >
-        <span className="grid h-3.5 w-3.5 place-items-center text-[11px] text-text-disabled">
+        <span className="grid h-4 w-4 place-items-center text-xs text-text-disabled">
           {glyph}
         </span>
         <span className="truncate">{children}</span>
       </button>
       {count !== undefined && !open ? (
-        <span className="font-mono text-[10px] text-text-disabled group-hover:hidden">
+        <span className="font-mono text-[11px] text-text-disabled group-hover:hidden">
           {count}
         </span>
       ) : null}
@@ -176,14 +178,14 @@ function ItemWithMenu({
           setOpen((v) => !v);
         }}
         aria-label="Actions"
-        className={`grid h-4 w-4 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 ${
+        className={`grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors ${
           open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
         }`}
       >
-        ⋯
+        <Icon name="more" size={12} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-6 z-10 w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
+        <div className="absolute right-0 top-7 z-10 w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
           <button
             type="button"
             onClick={(e) => {
@@ -191,7 +193,7 @@ function ItemWithMenu({
               setOpen(false);
               onDelete();
             }}
-            className="block w-full px-3 py-1.5 text-left text-[11px] text-destructive hover:bg-white/[0.05]"
+            className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05] transition-colors"
           >
             Delete
           </button>
@@ -224,6 +226,7 @@ function MilestoneSection({
       qc.invalidateQueries({ queryKey: ["board", projectId] });
       setOpen(false);
     },
+    onError: (err) => toastError(err),
   });
   const del = useMutation({
     mutationFn: (milestoneId: string) => api.deleteMilestone(milestoneId),
@@ -231,6 +234,7 @@ function MilestoneSection({
       qc.invalidateQueries({ queryKey: ["board", projectId] });
       if (active === milestoneId) onSelect("all");
     },
+    onError: (err) => toastError(err),
   });
 
   const milestones: Milestone[] = board.data?.milestones ?? [];
@@ -242,12 +246,12 @@ function MilestoneSection({
     ) ?? 0;
 
   return (
-    <section className="ws-section mb-4">
+    <section className="ws-section mb-5">
       <SectionHead label="Milestones" onAdd={() => setOpen(true)} />
       <Item
         active={active === "all"}
         onClick={() => onSelect("all")}
-        glyph="◆"
+        glyph={<Icon name="milestone" size={12} />}
         count={total}
       >
         All
@@ -259,12 +263,8 @@ function MilestoneSection({
           onClick={() => onSelect(active === m.id ? "all" : m.id)}
           glyph={
             <span
-              className={
-                active === m.id ? "text-accent-warm" : "text-text-disabled"
-              }
-            >
-              ●
-            </span>
+              className={`inline-block h-1.5 w-1.5 rounded-full ${active === m.id ? "bg-accent-warm" : "bg-text-disabled"}`}
+            />
           }
           count={countFor(m.id)}
           onDelete={() => {
@@ -306,14 +306,14 @@ function DocSection({
     queryFn: () => api.docs(projectId),
   });
   return (
-    <section className="ws-section mb-4">
+    <section className="ws-section mb-5">
       <SectionHead label="Docs" onAdd={onCreate} />
       {docs.data?.map((d: Doc) => (
         <Item
           key={d.id}
           active={d.id === activeId}
           onClick={() => onSelect(d.id === activeId ? null : d.id)}
-          glyph="§"
+          glyph={<Icon name="doc" size={14} />}
         >
           {d.title || "Untitled"}
         </Item>
@@ -336,10 +336,11 @@ function RefSection({ projectId }: { projectId: string }) {
       qc.invalidateQueries({ queryKey: ["project-games", projectId] });
       setOpen(false);
     },
+    onError: (err) => toastError(err),
   });
 
   return (
-    <section className="ws-section mb-4">
+    <section className="ws-section mb-5">
       <SectionHead label="Refs" onAdd={() => setOpen((v) => !v)} />
       {games.data?.map((g: ProjectGame) => (
         <Link
@@ -347,7 +348,7 @@ function RefSection({ projectId }: { projectId: string }) {
           to="/games/$id"
           params={{ id: String(g.universeId) }}
           title={g.note ?? undefined}
-          className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs text-text-3 hover:bg-white/[0.04] hover:text-text-1"
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-3 hover:bg-white/[0.04] hover:text-text-1 transition-colors"
         >
           {g.iconUrl ? (
             <img
@@ -356,7 +357,7 @@ function RefSection({ projectId }: { projectId: string }) {
               className="h-4 w-4 shrink-0 rounded-sm object-cover"
             />
           ) : (
-            <span className="grid h-4 w-4 place-items-center rounded-sm bg-white/[0.06] text-[9px] font-bold text-text-1">
+            <span className="grid h-4 w-4 place-items-center rounded-sm bg-white/[0.06] text-[10px] font-bold text-text-1">
               {g.name.slice(0, 1).toUpperCase()}
             </span>
           )}
@@ -380,9 +381,9 @@ function TagSection() {
   // disabled List/Timeline tabs in the board header). Kept visible so the
   // affordance is discoverable; hover tooltip explains.
   return (
-    <section className="ws-section mb-4">
+    <section className="ws-section mb-5">
       <SectionHead label="Filter tags" />
-      <div className="flex flex-wrap gap-1 px-1.5">
+      <div className="flex flex-wrap gap-1.5 px-2">
         <TagChip active>all</TagChip>
         {TAG_KEYS.map((k) => (
           <TagChip key={k} disabled title="tag filter coming soon">
@@ -408,7 +409,7 @@ function TagChip({
   return (
     <span
       title={title}
-      className={`rounded-[10px] border px-1.5 py-px font-mono text-[10px] ${
+      className={`rounded-[10px] border px-2 py-0.5 font-mono text-xs ${
         active
           ? "border-text-1 bg-text-1 text-surface-0"
           : "border-border-2 text-text-3"
@@ -445,7 +446,7 @@ function InlineForm({
         onBlur={onCancel}
         onKeyDown={(e) => e.key === "Escape" && onCancel()}
         placeholder={placeholder}
-        className="w-full rounded border border-border-1 bg-surface-1 px-2 py-1 text-xs text-text-1 outline-none focus:border-text-5"
+        className="w-full rounded border border-border-1 bg-surface-1 px-2.5 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
       />
     </form>
   );

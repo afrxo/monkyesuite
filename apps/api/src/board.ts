@@ -5,7 +5,7 @@
 // so a move/reorder rewrites exactly one row and the client never sends a key.
 
 import { generateKeyBetween } from "@monkyesuite/core";
-import { games, milestones, tasks, users } from "@monkyesuite/database";
+import { games, milestones, taskAttachments, tasks, users } from "@monkyesuite/database";
 import {
   type Board,
   type BoardLane,
@@ -27,6 +27,7 @@ import { Hono } from "hono";
 import { resolveItemAccess, resolveProjectAccess } from "./access.js";
 import { logActivity } from "./cards.js";
 import { notFound, validationError } from "./errors.js";
+import { coverUrlFor } from "./r2.js";
 import { toDisplayUsername } from "./identity.js";
 import { type AppEnv, requireUser } from "./middleware.js";
 import { iso, isoReq } from "./serialize.js";
@@ -35,13 +36,15 @@ import { type Tx, withUser } from "./tx.js";
 type TaskRow = typeof tasks.$inferSelect;
 
 // The joined columns every task select needs: assignee identity + linked-game
-// chip. Kept as one shape so mapping is uniform for parents and subtasks.
+// chip + cover attachment for board card cover images.
 const taskSelect = {
   task: tasks,
   assigneeName: users.name,
   assigneeEmail: users.email,
   gameName: games.name,
   gameIcon: games.iconUrl,
+  coverR2Key: taskAttachments.r2Key,
+  coverMimeType: taskAttachments.mimeType,
 } as const;
 
 type TaskJoin = {
@@ -50,6 +53,8 @@ type TaskJoin = {
   assigneeEmail: string | null;
   gameName: string | null;
   gameIcon: string | null;
+  coverR2Key: string | null;
+  coverMimeType: string | null;
 };
 
 function mapTask(row: TaskJoin, subtasks: Task[]): Task {
@@ -86,6 +91,10 @@ function mapTask(row: TaskJoin, subtasks: Task[]): Task {
     createdAt: isoReq(t.createdAt),
     updatedAt: isoReq(t.updatedAt),
     dueAt: iso(t.dueAt),
+    coverUrl:
+      row.coverR2Key && row.coverMimeType
+        ? coverUrlFor(row.coverMimeType, row.coverR2Key)
+        : null,
     subtasks,
   };
 }
@@ -109,6 +118,7 @@ async function taskJoinById(tx: Tx, id: string): Promise<TaskJoin | null> {
     .from(tasks)
     .leftJoin(users, eq(users.id, tasks.assigneeId))
     .leftJoin(games, eq(games.universeId, tasks.universeId))
+    .leftJoin(taskAttachments, eq(taskAttachments.id, tasks.coverAttachmentId))
     .where(eq(tasks.id, id))
     .limit(1);
   return row ?? null;
@@ -190,6 +200,7 @@ export function boardRoutes(): Hono<AppEnv> {
         .from(tasks)
         .leftJoin(users, eq(users.id, tasks.assigneeId))
         .leftJoin(games, eq(games.universeId, tasks.universeId))
+        .leftJoin(taskAttachments, eq(taskAttachments.id, tasks.coverAttachmentId))
         .where(eq(tasks.projectId, id))
         .orderBy(asc(tasks.orderKey));
 
@@ -349,6 +360,9 @@ export function boardRoutes(): Hono<AppEnv> {
           ...(d.universeId !== undefined ? { universeId: d.universeId } : {}),
           ...(d.dueAt !== undefined
             ? { dueAt: d.dueAt ? new Date(d.dueAt) : null }
+            : {}),
+          ...(d.coverAttachmentId !== undefined
+            ? { coverAttachmentId: d.coverAttachmentId }
             : {}),
           updatedAt: new Date(),
         })
@@ -572,6 +586,7 @@ async function subtasksOf(tx: Tx, parentId: string): Promise<Task[]> {
     .from(tasks)
     .leftJoin(users, eq(users.id, tasks.assigneeId))
     .leftJoin(games, eq(games.universeId, tasks.universeId))
+    .leftJoin(taskAttachments, eq(taskAttachments.id, tasks.coverAttachmentId))
     .where(eq(tasks.parentTaskId, parentId))
     .orderBy(asc(tasks.orderKey));
   return rows.map((row) => mapTask(row, []));
