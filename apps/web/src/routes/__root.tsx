@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createRootRoute,
   HeadContent,
+  Link,
   Outlet,
   Scripts,
   useLocation,
@@ -10,6 +11,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import AppHeader from "../components/AppHeader";
 import { TooltipProvider } from "../components/ui/tooltip";
+import { ApiError } from "../lib/api";
 import { useSession } from "../lib/auth";
 import appCss from "../styles.css?url";
 
@@ -31,7 +33,77 @@ const FULL_BLEED = new Set<string>(["/", "/sign-in"]);
 // of stacking two.
 const FULL_BLEED_PREFIX = ["/projects/"];
 
+function RootErrorComponent({ error }: { error: unknown }) {
+  const status = error instanceof ApiError ? error.status : 0;
+  const message =
+    error instanceof Error ? error.message : "An unexpected error occurred.";
+
+  if (status === 401) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border-1 bg-surface-1 text-xl">
+          🔒
+        </div>
+        <div className="flex flex-col gap-1">
+          <p className="text-base font-semibold text-text-1">Sign in required</p>
+          <p className="text-sm text-text-4">
+            Your session expired or you're not signed in.
+          </p>
+        </div>
+        <Link
+          to="/sign-in"
+          className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white"
+        >
+          Sign in
+        </Link>
+      </div>
+    );
+  }
+
+  if (status === 403) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border-1 bg-surface-1 text-xl">
+          🚫
+        </div>
+        <div className="flex flex-col gap-1">
+          <p className="text-base font-semibold text-text-1">Access denied</p>
+          <p className="text-sm text-text-4">
+            You don't have permission to view this.
+          </p>
+        </div>
+        <Link
+          to="/projects"
+          className="text-sm text-indigo-400 hover:underline"
+        >
+          ← back to your projects
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border-1 bg-surface-1 text-xl">
+        ⚠
+      </div>
+      <div className="flex flex-col gap-1">
+        <p className="text-base font-semibold text-text-1">Something went wrong</p>
+        <p className="max-w-sm text-sm text-text-4">{message}</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white"
+      >
+        Reload
+      </button>
+    </div>
+  );
+}
+
 export const Route = createRootRoute({
+  errorComponent: RootErrorComponent,
   head: () => ({
     meta: [
       { charSet: "utf-8" },

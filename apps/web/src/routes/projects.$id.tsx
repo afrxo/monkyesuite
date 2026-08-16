@@ -161,6 +161,8 @@ function WorkspacePage() {
           />
         ) : board.isPending ? (
           <p className="p-6 text-sm text-text-5">Loading board…</p>
+        ) : board.isError ? (
+          <p className="p-6 text-sm text-rose-400">{(board.error as Error)?.message ?? "Failed to load board."}</p>
         ) : board.data ? (
           <BoardView
             ref={boardRef}
