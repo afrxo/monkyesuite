@@ -89,7 +89,7 @@ export async function deleteObject(key: string): Promise<void> {
   );
 }
 
-// Best-effort thumbnail URL for images served from the public CDN base.
+// Best-effort thumbnail URL for images via Cloudflare Image Resizing.
 export function thumbnailUrlFor(
   mimeType: string,
   key: string,
@@ -99,14 +99,13 @@ export function thumbnailUrlFor(
   if (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
     return null;
   }
-  return `${base.replace(/\/$/, "")}/${key}`;
+  return `${base.replace(/\/$/, "")}/cdn-cgi/image/width=160,height=160,fit=cover,gravity=auto/${key}`;
 }
 
-// Cover image URL for card covers. Serves raw from the public CDN base;
-// no cdn-cgi/image transform (requires Cloudflare Image Resizing, Pro plan).
+// Cover image URL for card covers via Cloudflare Image Resizing.
 export function coverUrlFor(mimeType: string, key: string): string | null {
   const base = process.env.R2_PUBLIC_URL_BASE;
   if (!base) return null;
   if (!mimeType.startsWith("image/")) return null;
-  return `${base.replace(/\/$/, "")}/${key}`;
+  return `${base.replace(/\/$/, "")}/cdn-cgi/image/width=900,height=280,fit=cover,gravity=auto/${key}`;
 }
