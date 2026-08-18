@@ -69,6 +69,7 @@ import {
 import { gameNoteRoutes } from "./gamenotes.js";
 import { type AppEnv, requireUser, resolveSession } from "./middleware.js";
 import { scopedRoutes } from "./scoped.js";
+import { projectTagRoutes } from "./projectTags.js";
 import { tagRoutes } from "./tags.js";
 import { workspaceRoutes } from "./workspace.js";
 
@@ -345,6 +346,7 @@ export function createApp() {
   scoped.route("/", workspaceRoutes());
   scoped.route("/", gameNoteRoutes());
   scoped.route("/", tagRoutes());
+  scoped.route("/", projectTagRoutes());
   app.route("/v1", scoped);
   // Operator surface (specs/09). Outside /v1 and outside the JSON contract:
   // server-rendered HTML behind the admin-only gate, with its own error

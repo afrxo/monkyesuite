@@ -12,6 +12,7 @@ import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
+import { MiniAvatar } from "./BoardView";
 import { extractTaskRefs } from "./short-id";
 
 type Props = { projectId: string; onOpenCard?: (ref: string) => void };
@@ -237,6 +238,15 @@ function NoteItem({
           <Icon name="x" size={11} />
         </button>
       </div>
+      {note.author ? (
+        <div
+          className="mb-1 flex items-center gap-1.5 text-[11px] text-text-disabled"
+          title={note.author.email}
+        >
+          <MiniAvatar name={note.author.name ?? note.author.email} />
+          <span>{note.author.name ?? note.author.email.split("@")[0]}</span>
+        </div>
+      ) : null}
       {note.body ? (
         <p className="whitespace-pre-wrap text-sm leading-[1.5] text-text-3">
           {note.body}

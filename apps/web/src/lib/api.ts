@@ -14,6 +14,7 @@ import type {
   CreateNoteInput,
   CreateProjectGameInput,
   CreateProjectInput,
+  CreateProjectTagInput,
   CreateSubtaskInput,
   CreateTaskInput,
   DemandOverlay,
@@ -40,11 +41,13 @@ import type {
   PatchMilestoneInput,
   PatchNoteInput,
   PatchProjectInput,
+  PatchProjectTagInput,
   PatchTaskInput,
   Project,
   ProjectDetail,
   ProjectGame,
   ProjectNote,
+  ProjectTag,
   PulseFilter,
   PulsePayload,
   PulseSearchResult,
@@ -271,4 +274,17 @@ export const api = {
     get<AttachmentViewTicket>(`/attachments/${attachmentId}/url`),
   deleteAttachment: (attachmentId: string) =>
     del(`/attachments/${attachmentId}`),
+
+  // Card tags — per-project vocabulary + per-card application.
+  projectTags: (projectId: string) =>
+    get<ProjectTag[]>(`/projects/${projectId}/tags`),
+  createProjectTag: (projectId: string, input: CreateProjectTagInput) =>
+    post<ProjectTag>(`/projects/${projectId}/tags`, input),
+  patchProjectTag: (tagId: string, input: PatchProjectTagInput) =>
+    patch<ProjectTag>(`/project-tags/${tagId}`, input),
+  deleteProjectTag: (tagId: string) => del(`/project-tags/${tagId}`),
+  applyTaskTag: (taskId: string, tagId: string) =>
+    post<ProjectTag>(`/tasks/${taskId}/tags`, { tagId }),
+  removeTaskTag: (taskId: string, tagId: string) =>
+    del(`/tasks/${taskId}/tags/${tagId}`),
 };

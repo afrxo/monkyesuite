@@ -5,7 +5,16 @@
 // so a move/reorder rewrites exactly one row and the client never sends a key.
 
 import { generateKeyBetween } from "@monkyesuite/core";
-import { games, milestones, taskAttachments, tasks, users } from "@monkyesuite/database";
+import {
+  games,
+  milestones,
+  projectTags,
+  taskAssignees,
+  taskAttachments,
+  tasks,
+  taskTags,
+  users,
+} from "@monkyesuite/database";
 import {
   type Board,
   type BoardLane,
@@ -16,13 +25,14 @@ import {
   moveTaskSchema,
   patchMilestoneSchema,
   patchTaskSchema,
+  type ProjectTag,
   reorderTaskSchema,
   TASK_STATUSES,
   type Task,
   type TaskStatus,
   uuidSchema,
 } from "@monkyesuite/shared";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { resolveItemAccess, resolveProjectAccess } from "./access.js";
 import { logActivity } from "./cards.js";
@@ -35,12 +45,11 @@ import { type Tx, withUser } from "./tx.js";
 
 type TaskRow = typeof tasks.$inferSelect;
 
-// The joined columns every task select needs: assignee identity + linked-game
-// chip + cover attachment for board card cover images.
+// The joined columns every task select needs: linked-game chip + cover
+// attachment. Assignees are multi-valued and loaded separately (via
+// assigneesByTask) to keep the row shape scalar.
 const taskSelect = {
   task: tasks,
-  assigneeName: users.name,
-  assigneeEmail: users.email,
   gameName: games.name,
   gameIcon: games.iconUrl,
   coverR2Key: taskAttachments.r2Key,
@@ -49,15 +58,125 @@ const taskSelect = {
 
 type TaskJoin = {
   task: TaskRow;
-  assigneeName: string | null;
-  assigneeEmail: string | null;
   gameName: string | null;
   gameIcon: string | null;
   coverR2Key: string | null;
   coverMimeType: string | null;
 };
 
-function mapTask(row: TaskJoin, subtasks: Task[]): Task {
+export type AssigneeRef = { id: string; name: string | null; email: string };
+
+const mapProjectTag = (r: typeof projectTags.$inferSelect): ProjectTag => ({
+  id: r.id,
+  projectId: r.projectId,
+  name: r.name,
+  color: r.color,
+  createdAt: isoReq(r.createdAt),
+  updatedAt: isoReq(r.updatedAt),
+});
+
+// Batch-load assignees for a set of tasks in one round-trip.
+export async function assigneesByTask(
+  tx: Tx,
+  taskIds: string[],
+): Promise<Map<string, AssigneeRef[]>> {
+  const out = new Map<string, AssigneeRef[]>();
+  if (taskIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      taskId: taskAssignees.taskId,
+      id: users.id,
+      name: users.name,
+      email: users.email,
+    })
+    .from(taskAssignees)
+    .innerJoin(users, eq(users.id, taskAssignees.userId))
+    .where(inArray(taskAssignees.taskId, taskIds))
+    .orderBy(asc(users.name));
+  for (const r of rows) {
+    const list = out.get(r.taskId) ?? [];
+    list.push({
+      id: r.id,
+      name: r.name,
+      email: toDisplayUsername(r.email),
+    });
+    out.set(r.taskId, list);
+  }
+  return out;
+}
+
+async function assigneesOf(tx: Tx, taskId: string): Promise<AssigneeRef[]> {
+  return (await assigneesByTask(tx, [taskId])).get(taskId) ?? [];
+}
+
+// Full replacement of a card's assignee set. Returns {added, removed} so the
+// caller can log an assignee_change event with a diff, not just the new set.
+export async function setAssignees(
+  tx: Tx,
+  taskId: string,
+  projectId: string,
+  actorId: string,
+  next: string[],
+): Promise<{ added: string[]; removed: string[] }> {
+  const dedup = [...new Set(next)];
+  const current = await tx
+    .select({ userId: taskAssignees.userId })
+    .from(taskAssignees)
+    .where(eq(taskAssignees.taskId, taskId));
+  const currentSet = new Set(current.map((r) => r.userId));
+  const nextSet = new Set(dedup);
+  const added = dedup.filter((u) => !currentSet.has(u));
+  const removed = [...currentSet].filter((u) => !nextSet.has(u));
+  if (removed.length > 0) {
+    await tx
+      .delete(taskAssignees)
+      .where(
+        and(
+          eq(taskAssignees.taskId, taskId),
+          inArray(taskAssignees.userId, removed),
+        ),
+      );
+  }
+  if (added.length > 0) {
+    await tx.insert(taskAssignees).values(
+      added.map((userId) => ({
+        taskId,
+        userId,
+        projectId,
+        addedBy: actorId,
+      })),
+    );
+  }
+  return { added, removed };
+}
+
+// Batch-load tags for a set of tasks in one round-trip; returns a per-task map.
+export async function tagsByTask(
+  tx: Tx,
+  taskIds: string[],
+): Promise<Map<string, ProjectTag[]>> {
+  const out = new Map<string, ProjectTag[]>();
+  if (taskIds.length === 0) return out;
+  const rows = await tx
+    .select({ taskId: taskTags.taskId, tag: projectTags })
+    .from(taskTags)
+    .innerJoin(projectTags, eq(projectTags.id, taskTags.tagId))
+    .where(inArray(taskTags.taskId, taskIds))
+    .orderBy(asc(projectTags.name));
+  for (const r of rows) {
+    const list = out.get(r.taskId) ?? [];
+    list.push(mapProjectTag(r.tag));
+    out.set(r.taskId, list);
+  }
+  return out;
+}
+
+function mapTask(
+  row: TaskJoin,
+  subtasks: Task[],
+  tags: ProjectTag[] = [],
+  assignees: AssigneeRef[] = [],
+): Task {
   const t = row.task;
   return {
     id: t.id,
@@ -69,15 +188,7 @@ function mapTask(row: TaskJoin, subtasks: Task[]): Task {
     status: t.status,
     priority: t.priority,
     orderKey: t.orderKey,
-    assigneeId: t.assigneeId,
-    assignee:
-      t.assigneeId && row.assigneeEmail
-        ? {
-            id: t.assigneeId,
-            name: row.assigneeName,
-            email: toDisplayUsername(row.assigneeEmail),
-          }
-        : null,
+    assignees,
     universeId: t.universeId,
     game:
       t.universeId && row.gameName
@@ -95,6 +206,7 @@ function mapTask(row: TaskJoin, subtasks: Task[]): Task {
       row.coverR2Key && row.coverMimeType
         ? coverUrlFor(row.coverMimeType, row.coverR2Key)
         : null,
+    tags,
     subtasks,
   };
 }
@@ -116,7 +228,6 @@ async function taskJoinById(tx: Tx, id: string): Promise<TaskJoin | null> {
   const [row] = await tx
     .select(taskSelect)
     .from(tasks)
-    .leftJoin(users, eq(users.id, tasks.assigneeId))
     .leftJoin(games, eq(games.universeId, tasks.universeId))
     .leftJoin(taskAttachments, eq(taskAttachments.id, tasks.coverAttachmentId))
     .where(eq(tasks.id, id))
@@ -198,17 +309,29 @@ export function boardRoutes(): Hono<AppEnv> {
       const rows = await tx
         .select(taskSelect)
         .from(tasks)
-        .leftJoin(users, eq(users.id, tasks.assigneeId))
         .leftJoin(games, eq(games.universeId, tasks.universeId))
         .leftJoin(taskAttachments, eq(taskAttachments.id, tasks.coverAttachmentId))
         .where(eq(tasks.projectId, id))
         .orderBy(asc(tasks.orderKey));
 
+      const ids = rows.map((r) => r.task.id);
+      const [tagMap, assigneeMap] = await Promise.all([
+        tagsByTask(tx, ids),
+        assigneesByTask(tx, ids),
+      ]);
+
       const childrenByParent = new Map<string, Task[]>();
       for (const row of rows) {
         if (!row.task.parentTaskId) continue;
         const list = childrenByParent.get(row.task.parentTaskId) ?? [];
-        list.push(mapTask(row, []));
+        list.push(
+          mapTask(
+            row,
+            [],
+            tagMap.get(row.task.id) ?? [],
+            assigneeMap.get(row.task.id) ?? [],
+          ),
+        );
         childrenByParent.set(row.task.parentTaskId, list);
       }
 
@@ -219,7 +342,12 @@ export function boardRoutes(): Hono<AppEnv> {
       const laneOf = new Map(lanes.map((l) => [l.status, l]));
       for (const row of rows) {
         if (row.task.parentTaskId) continue;
-        const task = mapTask(row, childrenByParent.get(row.task.id) ?? []);
+        const task = mapTask(
+          row,
+          childrenByParent.get(row.task.id) ?? [],
+          tagMap.get(row.task.id) ?? [],
+          assigneeMap.get(row.task.id) ?? [],
+        );
         laneOf.get(task.status)?.tasks.push(task);
       }
 
@@ -258,13 +386,15 @@ export function boardRoutes(): Hono<AppEnv> {
           priority: body.data.priority,
           orderKey,
           milestoneId: body.data.milestoneId ?? null,
-          assigneeId: body.data.assigneeId ?? null,
           universeId: body.data.universeId ?? null,
           dueAt: body.data.dueAt ? new Date(body.data.dueAt) : null,
           createdBy: userId,
         })
         .returning({ id: tasks.id });
       if (!row) throw notFound("Task creation failed.");
+      if (body.data.assigneeIds?.length) {
+        await setAssignees(tx, row.id, id, userId, body.data.assigneeIds);
+      }
       await logActivity(tx, {
         taskId: row.id,
         projectId: id,
@@ -273,7 +403,12 @@ export function boardRoutes(): Hono<AppEnv> {
       });
       const join = await taskJoinById(tx, row.id);
       if (!join) throw notFound("Task creation failed.");
-      return mapTask(join, []);
+      return mapTask(
+        join,
+        [],
+        await tagsOf(tx, row.id),
+        await assigneesOf(tx, row.id),
+      );
     });
     return c.json(task, 201);
   });
@@ -320,14 +455,21 @@ export function boardRoutes(): Hono<AppEnv> {
           priority: body.data.priority,
           orderKey,
           milestoneId: parent.milestoneId,
-          assigneeId: body.data.assigneeId ?? null,
           createdBy: userId,
         })
         .returning({ id: tasks.id });
       if (!row) throw notFound("Subtask creation failed.");
+      if (body.data.assigneeIds?.length) {
+        await setAssignees(tx, row.id, projectId, userId, body.data.assigneeIds);
+      }
       const join = await taskJoinById(tx, row.id);
       if (!join) throw notFound("Subtask creation failed.");
-      return mapTask(join, []);
+      return mapTask(
+        join,
+        [],
+        await tagsOf(tx, row.id),
+        await assigneesOf(tx, row.id),
+      );
     });
     return c.json(task, 201);
   });
@@ -343,7 +485,7 @@ export function boardRoutes(): Hono<AppEnv> {
     const task = await withUser(userId, async (tx): Promise<Task> => {
       const { projectId } = await resolveItemAccess(tx, "task", id, userId);
       const [before] = await tx
-        .select({ title: tasks.title, assigneeId: tasks.assigneeId })
+        .select({ title: tasks.title })
         .from(tasks)
         .where(eq(tasks.id, id))
         .limit(1);
@@ -356,7 +498,6 @@ export function boardRoutes(): Hono<AppEnv> {
           ...(d.milestoneId !== undefined
             ? { milestoneId: d.milestoneId }
             : {}),
-          ...(d.assigneeId !== undefined ? { assigneeId: d.assigneeId } : {}),
           ...(d.universeId !== undefined ? { universeId: d.universeId } : {}),
           ...(d.dueAt !== undefined
             ? { dueAt: d.dueAt ? new Date(d.dueAt) : null }
@@ -367,6 +508,18 @@ export function boardRoutes(): Hono<AppEnv> {
           updatedAt: new Date(),
         })
         .where(eq(tasks.id, id));
+      if (d.assigneeIds !== undefined) {
+        const diff = await setAssignees(tx, id, projectId, userId, d.assigneeIds);
+        if (diff.added.length > 0 || diff.removed.length > 0) {
+          await logActivity(tx, {
+            taskId: id,
+            projectId,
+            actorId: userId,
+            kind: "assignee_change",
+            payload: { added: diff.added, removed: diff.removed },
+          });
+        }
+      }
       if (before) {
         if (d.title !== undefined && d.title !== before.title) {
           await logActivity(tx, {
@@ -377,24 +530,12 @@ export function boardRoutes(): Hono<AppEnv> {
             payload: { from: before.title, to: d.title },
           });
         }
-        if (
-          d.assigneeId !== undefined &&
-          d.assigneeId !== before.assigneeId
-        ) {
-          await logActivity(tx, {
-            taskId: id,
-            projectId,
-            actorId: userId,
-            kind: "assignee_change",
-            payload: { from: before.assigneeId, to: d.assigneeId },
-          });
-        }
       }
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");
       // Return the parent's subtasks too, so an edited parent re-renders whole.
       const kids = await subtasksOf(tx, id);
-      return mapTask(join, kids);
+      return mapTask(join, kids, await tagsOf(tx, id), await assigneesOf(tx, id));
     });
     return c.json(task);
   });
@@ -433,7 +574,7 @@ export function boardRoutes(): Hono<AppEnv> {
       }
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");
-      return mapTask(join, await subtasksOf(tx, id));
+      return mapTask(join, await subtasksOf(tx, id), await tagsOf(tx, id), await assigneesOf(tx, id));
     });
     return c.json(task);
   });
@@ -464,7 +605,7 @@ export function boardRoutes(): Hono<AppEnv> {
         .where(eq(tasks.id, id));
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");
-      return mapTask(join, await subtasksOf(tx, id));
+      return mapTask(join, await subtasksOf(tx, id), await tagsOf(tx, id), await assigneesOf(tx, id));
     });
     return c.json(task);
   });
@@ -584,10 +725,27 @@ async function subtasksOf(tx: Tx, parentId: string): Promise<Task[]> {
   const rows = await tx
     .select(taskSelect)
     .from(tasks)
-    .leftJoin(users, eq(users.id, tasks.assigneeId))
     .leftJoin(games, eq(games.universeId, tasks.universeId))
     .leftJoin(taskAttachments, eq(taskAttachments.id, tasks.coverAttachmentId))
     .where(eq(tasks.parentTaskId, parentId))
     .orderBy(asc(tasks.orderKey));
-  return rows.map((row) => mapTask(row, []));
+  const ids = rows.map((r) => r.task.id);
+  const [tagMap, assigneeMap] = await Promise.all([
+    tagsByTask(tx, ids),
+    assigneesByTask(tx, ids),
+  ]);
+  return rows.map((row) =>
+    mapTask(
+      row,
+      [],
+      tagMap.get(row.task.id) ?? [],
+      assigneeMap.get(row.task.id) ?? [],
+    ),
+  );
 }
+
+// Load a single task's tags — used after per-task writes to return a full DTO.
+async function tagsOf(tx: Tx, taskId: string): Promise<ProjectTag[]> {
+  return (await tagsByTask(tx, [taskId])).get(taskId) ?? [];
+}
+

@@ -110,13 +110,17 @@ export type ApplyTagInput = z.infer<typeof applyTagSchema>;
 // Positive-integer universeId link, or explicit null to clear it.
 const universeLink = z.number().int().positive().nullable();
 
+// Assignee membership is a full replacement — the client sends the desired
+// user-id set, the server diffs it against the current set (add/remove).
+const assigneeIds = z.array(z.string()).max(20);
+
 export const createTaskSchema = z.object({
   title: z.string().min(1).max(200),
   body: z.string().max(20000).optional(),
   status: z.enum(TASK_STATUSES).optional(), // defaults to backlog server-side
   priority: z.enum(TASK_PRIORITIES).default("none"),
   milestoneId: z.string().uuid().nullable().optional(),
-  assigneeId: z.string().nullable().optional(),
+  assigneeIds: assigneeIds.optional(),
   universeId: universeLink.optional(),
   dueAt: z.string().datetime().nullable().optional(),
 });
@@ -128,7 +132,7 @@ export const patchTaskSchema = z
     body: z.string().max(20000).nullable().optional(),
     priority: z.enum(TASK_PRIORITIES).optional(),
     milestoneId: z.string().uuid().nullable().optional(),
-    assigneeId: z.string().nullable().optional(),
+    assigneeIds: assigneeIds.optional(),
     universeId: universeLink.optional(),
     dueAt: z.string().datetime().nullable().optional(),
     coverAttachmentId: z.string().uuid().nullable().optional(),
@@ -157,10 +161,39 @@ export type ReorderTaskInput = z.infer<typeof reorderTaskSchema>;
 export const createSubtaskSchema = z.object({
   title: z.string().min(1).max(200),
   body: z.string().max(20000).optional(),
-  assigneeId: z.string().nullable().optional(),
+  assigneeIds: assigneeIds.optional(),
   priority: z.enum(TASK_PRIORITIES).default("none"),
 });
 export type CreateSubtaskInput = z.input<typeof createSubtaskSchema>;
+
+/* --------------------------- project tag writes --------------------------- */
+// Per-project card labels — separate table + separate schemas from the global
+// `tags` axis vocabulary (createTagSchema above), which describes games.
+
+const projectTagName = z.string().trim().min(1).max(40);
+const projectTagColor = z
+  .string()
+  .regex(/^[a-z0-9-]{1,20}$/, "invalid color key")
+  .nullable()
+  .optional();
+
+export const createProjectTagSchema = z.object({
+  name: projectTagName,
+  color: projectTagColor,
+});
+export type CreateProjectTagInput = z.infer<typeof createProjectTagSchema>;
+
+export const patchProjectTagSchema = z
+  .object({
+    name: projectTagName.optional(),
+    color: projectTagColor,
+  })
+  .refine((v) => Object.keys(v).length > 0, "no fields to update");
+export type PatchProjectTagInput = z.infer<typeof patchProjectTagSchema>;
+
+// Applying a tag to a card: existing project_tags row only. No free text.
+export const applyTaskTagSchema = z.object({ tagId: uuidSchema });
+export type ApplyTaskTagInput = z.infer<typeof applyTaskTagSchema>;
 
 /* ---------------------------- milestone writes ---------------------------- */
 

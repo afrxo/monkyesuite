@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>somegame — card detail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #101010;
+    --panel-2: #141414;
+    --hover: #1a1a1a;
+    --border: #1e1e1e;
+    --border-strong: #2a2a2a;
+    --text: #ededed;
+    --text-dim: #8a8a8a;
+    --text-faint: #4a4a4a;
+    --accent: #d4a24c;
+    --danger: #d46a5c;
+    --ok: #6ab04c;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    font-size: 13px; line-height: 1.45;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+
+  /* ---------- dimmed board behind ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 220px 1fr 320px;
+    grid-template-rows: 44px 1fr;
+    height: 100vh;
+    filter: blur(2px) brightness(0.5);
+    pointer-events: none;
+    user-select: none;
+  }
+  .topbar { grid-column: 1 / -1; border-bottom: 1px solid var(--border); background: var(--bg); }
+  .sidebar { border-right: 1px solid var(--border); background: var(--bg); }
+  .main { background: #0c0c0c; }
+  .rail { border-left: 1px solid var(--border); background: var(--bg); }
+
+  /* faint bg content just for visual context */
+  .bg-fill { padding: 20px; color: var(--text-faint); font-size: 11px; }
+  .bg-col { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+  .bg-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 5px; height: 44px;
+  }
+  .bg-board { display: grid; grid-template-columns: repeat(4, 1fr); height: 100%; gap: 1px; background: var(--border); }
+  .bg-board > div { background: #0c0c0c; }
+
+  /* ---------- overlay ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: grid; place-items: center; z-index: 100;
+    padding: 40px;
+    animation: fade 120ms ease-out;
+  }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* ---------- modal ---------- */
+  .modal {
+    width: 100%; max-width: 920px; max-height: 88vh;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.02);
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+    animation: pop 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* ---------- modal head ---------- */
+  .m-head {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .m-id {
+    font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+    padding: 2px 6px; border-radius: 3px;
+  }
+  .m-id:hover { background: var(--hover); color: var(--text-dim); cursor: pointer; }
+  .m-crumb-sep { color: var(--text-faint); font-size: 11px; }
+  .m-status {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 9px; border-radius: 3px; background: var(--hover);
+    font-size: 11px; color: var(--text); cursor: pointer;
+    font-family: var(--mono);
+  }
+  .m-status:hover { background: #222; }
+  .m-status .caret { color: var(--text-faint); font-size: 9px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .m-head-spacer { flex: 1; }
+  .m-head-btn {
+    background: none; border: none; color: var(--text-faint);
+    font-size: 14px; cursor: pointer; padding: 4px 6px; border-radius: 3px;
+    line-height: 1;
+  }
+  .m-head-btn:hover { background: var(--hover); color: var(--text); }
+  .kbd {
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+    border: 1px solid var(--border); padding: 1px 5px; border-radius: 3px;
+  }
+
+  /* ---------- modal body left ---------- */
+  .m-main {
+    padding: 24px 28px; overflow-y: auto; min-width: 0;
+    border-right: 1px solid var(--border);
+  }
+  .m-title {
+    background: none; border: none; color: var(--text); outline: none;
+    font-family: inherit; font-size: 22px; font-weight: 600;
+    letter-spacing: -0.015em; width: 100%; padding: 2px 6px; margin: -2px -6px 20px;
+    border-radius: 4px;
+    line-height: 1.3;
+  }
+  .m-title:hover { background: var(--hover); }
+  .m-title:focus { background: var(--hover); box-shadow: inset 0 0 0 1px var(--border-strong); }
+
+  .section { margin-bottom: 26px; }
+  .section-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); font-weight: 600; margin-bottom: 10px;
+  }
+  .section-head .count {
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+    text-transform: none; letter-spacing: 0;
+  }
+  .section-head .add {
+    margin-left: auto; color: var(--text-faint); cursor: pointer;
+    font-size: 14px; line-height: 1;
+  }
+  .section-head .add:hover { color: var(--text); }
+
+  /* description */
+  .desc {
+    color: var(--text-dim); font-size: 13px; line-height: 1.6;
+    padding: 8px 10px; margin: -8px -10px;
+    border-radius: 5px; cursor: text;
+    min-height: 40px;
+  }
+  .desc:hover { background: var(--hover); }
+  .desc.editing { background: var(--hover); box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .desc strong { color: var(--text); font-weight: 500; }
+  .desc p + p { margin-top: 8px; }
+
+  /* checklist */
+  .cl-progress {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+  }
+  .cl-bar {
+    flex: 1; height: 2px; background: var(--border); border-radius: 1px; overflow: hidden;
+  }
+  .cl-bar-fill { height: 100%; background: var(--accent); width: 40%; }
+  .cl-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px; margin: 0 -8px; border-radius: 4px;
+    cursor: pointer;
+  }
+  .cl-item:hover { background: var(--hover); }
+  .cl-check {
+    width: 14px; height: 14px; border: 1px solid var(--border-strong);
+    border-radius: 3px; display: grid; place-items: center;
+    color: transparent; font-size: 10px; flex-shrink: 0;
+  }
+  .cl-item.done .cl-check { background: var(--accent); border-color: var(--accent); color: #1a1000; }
+  .cl-item.done .cl-text { color: var(--text-faint); text-decoration: line-through; }
+  .cl-text { font-size: 12px; color: var(--text); flex: 1; }
+  .cl-add {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px; margin: 4px -8px 0;
+    color: var(--text-faint); font-size: 12px; cursor: pointer;
+  }
+  .cl-add:hover { color: var(--text-dim); }
+  .cl-add-plus {
+    width: 14px; height: 14px; display: grid; place-items: center;
+    border: 1px dashed var(--border-strong); border-radius: 3px;
+    font-size: 10px;
+  }
+
+  /* attachments */
+  .att-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .att {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 5px; padding: 10px; cursor: pointer;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .att:hover { border-color: var(--border-strong); background: var(--panel-2); }
+  .att-icon {
+    width: 28px; height: 28px; border-radius: 4px; background: var(--hover);
+    display: grid; place-items: center; color: var(--text-dim);
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    flex-shrink: 0;
+  }
+  .att-body { min-width: 0; }
+  .att-name {
+    font-size: 11px; color: var(--text); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .att-meta { font-size: 10px; color: var(--text-faint); font-family: var(--mono); margin-top: 2px; }
+  .att-add {
+    background: transparent; border: 1px dashed var(--border-strong);
+    color: var(--text-faint); font-size: 11px;
+    display: grid; place-items: center; min-height: 52px; border-radius: 5px;
+    cursor: pointer;
+  }
+  .att-add:hover { color: var(--text-dim); border-color: #3a3a3a; }
+
+  /* comments */
+  .comment-input {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 5px; padding: 8px 10px; margin-bottom: 14px;
+  }
+  .comment-input textarea {
+    width: 100%; background: none; border: none; color: var(--text);
+    font-family: inherit; font-size: 12px; resize: none; outline: none; min-height: 32px;
+  }
+  .comment-input textarea::placeholder { color: var(--text-faint); }
+  .comment-input-foot {
+    display: flex; align-items: center; gap: 8px; margin-top: 6px;
+    padding-top: 6px; border-top: 1px solid var(--border);
+  }
+  .comment-input-hint {
+    font-size: 10px; color: var(--text-faint); font-family: var(--mono);
+    flex: 1;
+  }
+  .comment-btn {
+    background: var(--text); color: var(--bg); border: none;
+    padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 500;
+    cursor: pointer; font-family: inherit;
+  }
+
+  .comment { display: flex; gap: 10px; padding: 8px 0; }
+  .comment .avatar {
+    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+    display: grid; place-items: center; font-size: 10px; font-weight: 600;
+    background: linear-gradient(135deg, #3a2a1a, #d4a24c); color: #1a1000;
+  }
+  .comment-body { flex: 1; min-width: 0; }
+  .comment-meta {
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px;
+  }
+  .comment-author { font-size: 12px; font-weight: 500; color: var(--text); }
+  .comment-time { font-size: 10px; color: var(--text-faint); font-family: var(--mono); }
+  .comment-text { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+
+  /* ---------- modal body right ---------- */
+  .m-side {
+    padding: 20px 18px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 22px;
+  }
+  .prop { display: flex; flex-direction: column; gap: 6px; }
+  .prop-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); font-weight: 600;
+  }
+  .prop-value {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; color: var(--text);
+    margin: 0 -8px;
+  }
+  .prop-value:hover { background: var(--hover); }
+  .prop-value.empty { color: var(--text-faint); }
+  .prop-value .caret { margin-left: auto; color: var(--text-faint); font-size: 9px; }
+
+  .tag {
+    padding: 1px 7px; border-radius: 8px;
+    font-size: 10px; letter-spacing: 0.04em;
+  }
+  .tag-combat  { background: rgba(212, 106, 92, 0.12); color: #d46a5c; }
+  .tag-ui      { background: rgba(212, 162, 76, 0.12); color: #d4a24c; }
+  .tag-audio   { background: rgba(106, 176, 76, 0.12); color: #6ab04c; }
+
+  .prop-avatars { display: flex; margin-right: auto; }
+  .prop-avatars .avatar {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 9px; font-weight: 600;
+    border: 2px solid var(--bg); margin-left: -4px;
+    background: linear-gradient(135deg, #3a2a1a, #d4a24c); color: #1a1000;
+  }
+  .prop-avatars .avatar:first-child { margin-left: 0; }
+  .prop-avatars .avatar.add {
+    background: transparent; border: 1px dashed var(--border-strong);
+    color: var(--text-faint); font-weight: 400;
+  }
+
+  .backlink {
+    padding: 8px 10px; margin: 0 -10px;
+    border-radius: 4px; cursor: pointer;
+  }
+  .backlink:hover { background: var(--hover); }
+  .backlink-title { font-size: 11px; color: var(--text); font-weight: 500; margin-bottom: 2px; }
+  .backlink-body {
+    font-size: 11px; color: var(--text-dim); line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .backlink-time { font-size: 9px; color: var(--text-faint); font-family: var(--mono); margin-top: 3px; }
+
+  .activity {
+    font-size: 11px; color: var(--text-dim); line-height: 1.5;
+    padding: 5px 0;
+    display: flex; gap: 8px;
+  }
+  .activity-time {
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+    flex-shrink: 0; padding-top: 1px;
+  }
+  .activity strong { color: var(--text); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<!-- ===== dimmed board behind ===== -->
+<div class="app" aria-hidden="true">
+  <header class="topbar"></header>
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <div class="bg-board">
+      <div class="bg-col"><div class="bg-card"></div><div class="bg-card"></div><div class="bg-card"></div></div>
+      <div class="bg-col"><div class="bg-card"></div><div class="bg-card"></div></div>
+      <div class="bg-col"><div class="bg-card"></div><div class="bg-card"></div></div>
+      <div class="bg-col"><div class="bg-card"></div></div>
+    </div>
+  </main>
+  <aside class="rail"></aside>
+</div>
+
+<!-- ===== overlay + modal ===== -->
+<div class="overlay">
+  <div class="modal">
+
+    <!-- head -->
+    <div class="m-head">
+      <span class="m-id">SG-010</span>
+      <span class="m-crumb-sep">·</span>
+      <div class="m-status"><span class="status-dot"></span>To do<span class="caret">▾</span></div>
+      <div class="m-head-spacer"></div>
+      <button class="m-head-btn" title="Copy link">↗</button>
+      <button class="m-head-btn" title="More">⋯</button>
+      <button class="m-head-btn" title="Close">✕ <span class="kbd" style="margin-left:2px">Esc</span></button>
+    </div>
+
+    <!-- main column -->
+    <div class="m-main">
+
+      <input class="m-title" value="Hitstop + camera shake tuning">
+
+      <!-- description -->
+      <div class="section">
+        <div class="section-head">Description</div>
+        <div class="desc">
+          <p>Current hitstop reads mushy on the 3rd combo hit. Comparing against MM2 reference clips, their final blow lands with roughly <strong>4 frames</strong> of stop plus a punchy 0.28 trauma shake.</p>
+          <p>Goal: land the hit-feel triangle (stop / shake / VFX flash) inside a 60ms window so it reads as one impact instead of three overlapping events.</p>
+        </div>
+      </div>
+
+      <!-- checklist -->
+      <div class="section">
+        <div class="section-head">
+          Checklist
+          <span class="count">2 / 5</span>
+          <span class="add">+</span>
+        </div>
+        <div class="cl-progress">
+          <span>40%</span>
+          <div class="cl-bar"><div class="cl-bar-fill"></div></div>
+        </div>
+        <div class="cl-item done"><div class="cl-check">✓</div><div class="cl-text">Extract frame data from MM2 reference clips</div></div>
+        <div class="cl-item done"><div class="cl-check">✓</div><div class="cl-text">Prototype 4-frame stop on combo finisher</div></div>
+        <div class="cl-item"><div class="cl-check"></div><div class="cl-text">Wire trauma-based camera shake (max 0.35)</div></div>
+        <div class="cl-item"><div class="cl-check"></div><div class="cl-text">Reduced-motion setting caps shake at 0.1</div></div>
+        <div class="cl-item"><div class="cl-check"></div><div class="cl-text">A/B test with Sat playtest crew</div></div>
+        <div class="cl-add"><div class="cl-add-plus">+</div>add item</div>
+      </div>
+
+      <!-- attachments -->
+      <div class="section">
+        <div class="section-head">
+          Attachments
+          <span class="count">3</span>
+          <span class="add">+</span>
+        </div>
+        <div class="att-grid">
+          <div class="att">
+            <div class="att-icon">MP4</div>
+            <div class="att-body">
+              <div class="att-name">mm2-reference.mp4</div>
+              <div class="att-meta">4.2 MB</div>
+            </div>
+          </div>
+          <div class="att">
+            <div class="att-icon">PNG</div>
+            <div class="att-body">
+              <div class="att-name">shake-curve.png</div>
+              <div class="att-meta">184 KB</div>
+            </div>
+          </div>
+          <div class="att">
+            <div class="att-icon">LUA</div>
+            <div class="att-body">
+              <div class="att-name">Trauma.lua</div>
+              <div class="att-meta">2 KB</div>
+            </div>
+          </div>
+          <div class="att-add">+ drop or click</div>
+        </div>
+      </div>
+
+      <!-- comments -->
+      <div class="section">
+        <div class="section-head">Comments <span class="count">2</span></div>
+        <div class="comment-input">
+          <textarea placeholder="Write a comment…"></textarea>
+          <div class="comment-input-foot">
+            <div class="comment-input-hint">markdown ok · <span class="kbd">⌘↵</span> to send</div>
+            <button class="comment-btn">Comment</button>
+          </div>
+        </div>
+        <div class="comment">
+          <div class="avatar">af</div>
+          <div class="comment-body">
+            <div class="comment-meta">
+              <span class="comment-author">afrxo</span>
+              <span class="comment-time">2h ago</span>
+            </div>
+            <div class="comment-text">Bumped stop to 4f on the finisher — feels way better. Shake still tuning. Will push a build tonight.</div>
+          </div>
+        </div>
+        <div class="comment">
+          <div class="avatar">af</div>
+          <div class="comment-body">
+            <div class="comment-meta">
+              <span class="comment-author">afrxo</span>
+              <span class="comment-time">yesterday</span>
+            </div>
+            <div class="comment-text">Reference clips added. The MM2 hit-flash timing is the thing I want to match.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- right side properties -->
+    <aside class="m-side">
+
+      <div class="prop">
+        <span class="prop-label">Milestone</span>
+        <div class="prop-value">
+          <span style="color:var(--accent)">●</span>
+          <span>v0.2 combat</span>
+          <span class="caret">▾</span>
+        </div>
+      </div>
+
+      <div class="prop">
+        <span class="prop-label">Tag</span>
+        <div class="prop-value">
+          <span class="tag tag-combat">combat</span>
+          <span class="caret">▾</span>
+        </div>
+      </div>
+
+      <div class="prop">
+        <span class="prop-label">Assignee</span>
+        <div class="prop-value">
+          <div class="prop-avatars">
+            <div class="avatar">af</div>
+            <div class="avatar add">+</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="prop">
+        <span class="prop-label">Due date</span>
+        <div class="prop-value">
+          <span style="font-family:var(--mono);font-size:11px">Feb 18</span>
+          <span style="color:var(--text-faint);font-family:var(--mono);font-size:10px">· in 3d</span>
+          <span class="caret">▾</span>
+        </div>
+      </div>
+
+      <div class="prop">
+        <span class="prop-label">Linked notes <span class="count" style="color:var(--text-faint);font-family:var(--mono);font-weight:400;font-size:10px;text-transform:none;letter-spacing:0">2</span></span>
+        <div class="backlink">
+          <div class="backlink-title">Hitstop feels weak at 60hz</div>
+          <div class="backlink-body">Try bumping to 4 frames when the target has &lt;20% hp. Check against MM2 reference.</div>
+          <div class="backlink-time">2m ago</div>
+        </div>
+        <div class="backlink">
+          <div class="backlink-title">Playtest — Sat crew</div>
+          <div class="backlink-body">Everyone hit parry once by accident. Might be too generous.</div>
+          <div class="backlink-time">1h ago</div>
+        </div>
+      </div>
+
+      <div class="prop">
+        <span class="prop-label">Activity</span>
+        <div class="activity"><span class="activity-time">2h</span><span><strong>afrxo</strong> commented</span></div>
+        <div class="activity"><span class="activity-time">3h</span><span><strong>afrxo</strong> moved to <strong>To do</strong></span></div>
+        <div class="activity"><span class="activity-time">1d</span><span><strong>afrxo</strong> attached <em>mm2-reference.mp4</em></span></div>
+        <div class="activity"><span class="activity-time">2d</span><span><strong>afrxo</strong> created card</span></div>
+      </div>
+
+    </aside>
+
+  </div>
+</div>
+
+</body>
+</html>

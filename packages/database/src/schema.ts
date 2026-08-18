@@ -1014,9 +1014,9 @@ export const tasks = pgTable(
     status: taskStatus("status").notNull().default("backlog"),
     priority: taskPriority("priority").notNull().default("none"),
     orderKey: text("order_key").notNull(), // fractional index within (project,status)
-    assigneeId: text("assignee_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
+    // Multi-assignee lives in task_assignees below (a card can carry any
+    // number of people). The old single-column assigneeId is gone; the 0010
+    // migration backfills its values into the junction and drops the column.
     // optional research link into the GLOBAL tracker (Reading B). A project
     // with zero links is valid (Reading A) — this is an attachment, not the point.
     universeId: bigint("universe_id", { mode: "number" }).references(
@@ -1042,7 +1042,6 @@ export const tasks = pgTable(
     // board queries fetch a project's lane and sort by orderKey
     index("tasks_board_idx").on(t.projectId, t.status, t.orderKey),
     index("tasks_milestone_idx").on(t.milestoneId),
-    index("tasks_assignee_idx").on(t.assigneeId),
     index("tasks_parent_idx").on(t.parentTaskId),
     index("tasks_universe_idx").on(t.universeId),
     pgPolicy("tasks_member_rw", {
@@ -1264,6 +1263,112 @@ export const taskAttachments = pgTable(
 ).enableRLS();
 
 /**
+ * task_assignees — junction: which users a card is assigned to. A card can
+ * carry any number of members (specs/05 — teams sometimes co-own a card). Row
+ * ownership is per-project so RLS filters cleanly on either lookup direction.
+ */
+export const taskAssignees = pgTable(
+  "task_assignees",
+  {
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    addedBy: text("added_by")
+      .notNull()
+      .references(() => users.id),
+    addedAt: timestamp("added_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.userId] }),
+    index("task_assignees_user_idx").on(t.userId),
+    index("task_assignees_project_idx").on(t.projectId),
+    pgPolicy("task_assignees_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * project_tags — per-project label vocabulary. Free-form, renameable, unlike
+ * the global `tags` axis system (which describes GAMES, not cards). One row per
+ * label. Case-insensitive uniqueness inside a project so "Bug" and "bug" cannot
+ * both exist.
+ */
+export const projectTags = pgTable(
+  "project_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color"), // optional palette key; null → derived from name hash
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_tags_project_name_uq").on(t.projectId, sql`lower(${t.name})`),
+    pgPolicy("project_tags_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * task_tags — junction. Which project_tags are applied to which task. Both
+ * sides carry projectId so RLS filters cleanly on either lookup direction.
+ */
+export const taskTags = pgTable(
+  "task_tags",
+  {
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => projectTags.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    addedBy: text("added_by")
+      .notNull()
+      .references(() => users.id),
+    addedAt: timestamp("added_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.tagId] }),
+    index("task_tags_tag_idx").on(t.tagId),
+    index("task_tags_project_idx").on(t.projectId),
+    pgPolicy("task_tags_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
  * task_activity — append-only event feed for a card. payload is a jsonb with
  * event-shaped fields (old/new for changes, ids for referenced rows).
  */
@@ -1373,10 +1478,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     fields: [tasks.milestoneId],
     references: [milestones.id],
   }),
-  assignee: one(users, {
-    fields: [tasks.assigneeId],
-    references: [users.id],
-  }),
+  assignees: many(taskAssignees),
   // one-level subtasks: a parent and its children
   parent: one(tasks, {
     fields: [tasks.parentTaskId],

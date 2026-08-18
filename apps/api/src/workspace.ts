@@ -4,7 +4,7 @@
 // touch, inside a withUser tx. Project-note item routes live under
 // /project-notes/:id to stay clear of the GLOBAL game-note route /notes/:id.
 
-import { docs, games, notes, projectGame } from "@monkyesuite/database";
+import { docs, games, notes, projectGame, users } from "@monkyesuite/database";
 import {
   createDocSchema,
   createNoteSchema,
@@ -36,9 +36,11 @@ const mapDoc = (d: typeof docs.$inferSelect): Doc => ({
 });
 
 type NoteRow = typeof notes.$inferSelect;
+type NoteAuthor = { id: string; name: string | null; email: string };
 function mapNote(
   n: NoteRow,
   game: { name: string; iconUrl: string | null } | null,
+  author: NoteAuthor | null,
 ): ProjectNote {
   return {
     id: n.id,
@@ -51,6 +53,7 @@ function mapNote(
         ? { universeId: n.universeId, name: game.name, iconUrl: game.iconUrl }
         : null,
     createdBy: n.createdBy,
+    author,
     createdAt: isoReq(n.createdAt),
     updatedAt: isoReq(n.updatedAt),
   };
@@ -156,9 +159,17 @@ export function workspaceRoutes(): Hono<AppEnv> {
     const rows = await withUser(userId, async (tx) => {
       await resolveProjectAccess(tx, id, userId);
       return tx
-        .select({ note: notes, gameName: games.name, gameIcon: games.iconUrl })
+        .select({
+          note: notes,
+          gameName: games.name,
+          gameIcon: games.iconUrl,
+          authorId: users.id,
+          authorName: users.name,
+          authorEmail: users.email,
+        })
         .from(notes)
         .leftJoin(games, eq(games.universeId, notes.universeId))
+        .leftJoin(users, eq(users.id, notes.createdBy))
         .where(eq(notes.projectId, id))
         .orderBy(desc(notes.createdAt));
     });
@@ -167,6 +178,9 @@ export function workspaceRoutes(): Hono<AppEnv> {
         mapNote(
           row.note,
           row.gameName ? { name: row.gameName, iconUrl: row.gameIcon } : null,
+          row.authorId && row.authorEmail
+            ? { id: row.authorId, name: row.authorName, email: row.authorEmail }
+            : null,
         ),
       ),
     );
@@ -193,7 +207,8 @@ export function workspaceRoutes(): Hono<AppEnv> {
         .returning();
       if (!row) throw notFound("Note creation failed.");
       const game = row.universeId ? await gameRef(tx, row.universeId) : null;
-      return mapNote(row, game);
+      const author = await userRef(tx, row.createdBy);
+      return mapNote(row, game, author);
     });
     return c.json(note, 201);
   });
@@ -220,7 +235,8 @@ export function workspaceRoutes(): Hono<AppEnv> {
         .returning();
       if (!row) throw notFound("No such note.");
       const game = row.universeId ? await gameRef(tx, row.universeId) : null;
-      return mapNote(row, game);
+      const author = await userRef(tx, row.createdBy);
+      return mapNote(row, game, author);
     });
     return c.json(note);
   });
@@ -340,6 +356,18 @@ async function gameRef(
     .select({ name: games.name, iconUrl: games.iconUrl })
     .from(games)
     .where(eq(games.universeId, universeId))
+    .limit(1);
+  return row ?? null;
+}
+
+async function userRef(
+  tx: Parameters<Parameters<typeof withUser<unknown>>[1]>[0],
+  userId: string,
+): Promise<{ id: string; name: string | null; email: string } | null> {
+  const [row] = await tx
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
     .limit(1);
   return row ?? null;
 }

@@ -36,6 +36,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import { resolveItemAccess } from "./access.js";
+import { assigneesByTask, tagsByTask } from "./board.js";
 import { forbidden, notFound, validationError } from "./errors.js";
 import { toDisplayUsername } from "./identity.js";
 import { type AppEnv, requireUser } from "./middleware.js";
@@ -264,16 +265,6 @@ export function cardRoutes(): Hono<AppEnv> {
         .limit(1);
       if (!taskRow) throw notFound("No such task.");
 
-      // Reuse the wire shape from board.ts by inlining a small mapper here —
-      // avoids importing across modules and keeps the field set stable.
-      const [assignee] = taskRow.assigneeId
-        ? await tx
-            .select({ name: users.name, email: users.email })
-            .from(users)
-            .where(eq(users.id, taskRow.assigneeId))
-            .limit(1)
-        : [];
-
       const proj = await loadTaskProject(tx, id);
       if (!proj) throw notFound("No such task.");
 
@@ -353,15 +344,8 @@ export function cardRoutes(): Hono<AppEnv> {
           status: taskRow.status,
           priority: taskRow.priority,
           orderKey: taskRow.orderKey,
-          assigneeId: taskRow.assigneeId,
-          assignee:
-            taskRow.assigneeId && assignee?.email
-              ? {
-                  id: taskRow.assigneeId,
-                  name: assignee.name,
-                  email: toDisplayUsername(assignee.email),
-                }
-              : null,
+          assignees:
+            (await assigneesByTask(tx, [taskRow.id])).get(taskRow.id) ?? [],
           universeId: taskRow.universeId,
           game: null,
           createdBy: taskRow.createdBy,
@@ -369,6 +353,7 @@ export function cardRoutes(): Hono<AppEnv> {
           updatedAt: isoReq(taskRow.updatedAt),
           dueAt: iso(taskRow.dueAt),
           coverUrl: null,
+          tags: (await tagsByTask(tx, [taskRow.id])).get(taskRow.id) ?? [],
           subtasks: [],
         },
         comments: commentRows.map(mapComment),

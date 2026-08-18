@@ -76,12 +76,13 @@ export async function projectExists(projectId: string): Promise<boolean> {
 // Flat scoped item routes (/tasks/:id, /milestones/:id, /docs/:id,
 // /project-notes/:id) resolve their owning project the same RLS-bypassing way,
 // so the API can 403-vs-404 before it fetches. `kind` picks the resolver fn.
-type ScopedItem = "task" | "milestone" | "doc" | "note";
+type ScopedItem = "task" | "milestone" | "doc" | "note" | "projectTag";
 const RESOLVER: Record<ScopedItem, string> = {
   task: "project_of_task",
   milestone: "project_of_milestone",
   doc: "project_of_doc",
   note: "project_of_note",
+  projectTag: "project_of_project_tag",
 };
 
 export async function projectOfItem(

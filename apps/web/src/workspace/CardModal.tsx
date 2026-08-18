@@ -10,6 +10,7 @@
 import type {
   LinkedNote,
   Milestone,
+  ProjectTag,
   Task,
   TaskAttachment,
   TaskChecklistItem,
@@ -32,9 +33,11 @@ import { Icon } from "../components/Icon";
 import { copyLink } from "../lib/clipboard";
 import { api } from "../lib/api";
 import { toastError } from "../components/Toast";
+import { useSession } from "../lib/auth";
 import { relTime } from "../lib/format";
 import { AttachmentViewer } from "./AttachmentViewer";
 import { shortTaskId } from "./short-id";
+import { tagChipClass } from "./tag";
 
 marked.use({ gfm: true, breaks: true, async: false });
 
@@ -758,14 +761,20 @@ function CommentsSection({
       </div>
       <div className="flex flex-col">
         {comments.map((c) => (
-          <CommentRow key={c.id} comment={c} />
+          <CommentRow key={c.id} comment={c} onChanged={onChanged} />
         ))}
       </div>
     </Section>
   );
 }
 
-function CommentRow({ comment }: { comment: TaskComment }) {
+function CommentRow({
+  comment,
+  onChanged,
+}: {
+  comment: TaskComment;
+  onChanged: () => void;
+}) {
   const initials = initialsOf(
     comment.author?.name ?? comment.author?.email ?? "?",
   );
@@ -773,8 +782,15 @@ function CommentRow({ comment }: { comment: TaskComment }) {
     () => marked.parse(comment.body) as string,
     [comment.body],
   );
+  const { user } = useSession();
+  const canDelete = !!user && user.id === comment.authorId;
+  const del = useMutation({
+    mutationFn: () => api.deleteComment(comment.id),
+    onSuccess: onChanged,
+    onError: (err) => toastError(err),
+  });
   return (
-    <div className="flex gap-2.5 py-2">
+    <div className="group flex gap-2.5 py-2">
       <span className="grid h-[22px] w-[22px] flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#3a2a1a] to-accent-warm text-[10px] font-semibold text-[#1a1000]">
         {initials}
       </span>
@@ -786,6 +802,19 @@ function CommentRow({ comment }: { comment: TaskComment }) {
           <span className="font-mono text-[10px] text-text-disabled">
             {relTime(comment.createdAt)}
           </span>
+          {canDelete ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm("Delete this comment?")) del.mutate();
+              }}
+              disabled={del.isPending}
+              className="ml-auto grid h-5 w-5 place-items-center rounded text-text-disabled opacity-0 transition-colors group-hover:opacity-100 hover:text-rose-300"
+              title="Delete comment"
+            >
+              <Icon name="x" size={11} />
+            </button>
+          ) : null}
         </div>
         <div
           className="text-[12px] leading-[1.55] text-text-3"
@@ -823,6 +852,12 @@ function SideColumn({
     onSuccess: invalidate,
     onError: (err) => toastError(err),
   });
+  const setAssignees = useMutation({
+    mutationFn: (uids: string[]) =>
+      api.patchTask(t.id, { assigneeIds: uids }),
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
 
   return (
     <>
@@ -835,10 +870,18 @@ function SideColumn({
         />
       </Prop>
 
-      <Prop label="Assignee">
-        <span className="text-[12px] text-text-3">
-          {t.assignee?.name ?? t.assignee?.email ?? "unassigned"}
-        </span>
+      <Prop label="Assignees">
+        <AssigneePicker
+          projectId={t.projectId}
+          value={(t.assignees ?? []).map((a) => a.id)}
+          current={t.assignees ?? []}
+          onChange={(uids) => setAssignees.mutate(uids)}
+          pending={setAssignees.isPending}
+        />
+      </Prop>
+
+      <Prop label="Tags">
+        <TagsPicker task={t} onChanged={invalidate} />
       </Prop>
 
       <Prop label="Due date">
@@ -946,8 +989,16 @@ function activityText(
       return `moved to ${String(payload.to ?? "?")}`;
     case "title_change":
       return "renamed card";
-    case "assignee_change":
-      return "changed assignee";
+    case "assignee_change": {
+      const added = Array.isArray(payload.added) ? payload.added.length : 0;
+      const removed = Array.isArray(payload.removed)
+        ? payload.removed.length
+        : 0;
+      if (added && removed) return `updated assignees (+${added}, -${removed})`;
+      if (added) return `added ${added} assignee${added === 1 ? "" : "s"}`;
+      if (removed) return `removed ${removed} assignee${removed === 1 ? "" : "s"}`;
+      return "changed assignees";
+    }
     case "comment":
       return "commented";
     case "attachment":
@@ -1078,6 +1129,383 @@ function MilestonePicker({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function AssigneePicker({
+  projectId,
+  value,
+  current,
+  onChange,
+  pending,
+}: {
+  projectId: string;
+  value: string[];
+  current: { id: string; name: string | null; email: string }[];
+  onChange: (uids: string[]) => void;
+  pending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const members = useQuery({
+    queryKey: ["members", projectId],
+    queryFn: () => api.members(projectId),
+    enabled: open,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) =>
+      e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const selected = new Set(value);
+  const toggle = (uid: string) => {
+    const next = new Set(selected);
+    if (next.has(uid)) next.delete(uid);
+    else next.add(uid);
+    onChange([...next]);
+  };
+
+  return (
+    <div ref={wrapRef} className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-1">
+        {current.length === 0 ? (
+          <span className="text-[12px] text-text-3">unassigned</span>
+        ) : (
+          current.map((a) => (
+            <span
+              key={a.id}
+              className="inline-flex items-center gap-1 rounded-[8px] bg-surface-hover px-1.5 py-px text-[11px] text-text-1"
+              title={a.email}
+            >
+              {a.name ?? a.email}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(a.id);
+                }}
+                className="opacity-60 hover:opacity-100"
+                aria-label={`Remove ${a.name ?? a.email}`}
+              >
+                <Icon name="x" size={9} />
+              </button>
+            </span>
+          ))
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          disabled={pending}
+          className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1 disabled:opacity-50"
+        >
+          + assign
+        </button>
+      </div>
+
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+6px)] z-30 w-56 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-xl">
+          {members.isPending ? (
+            <div className="px-3 py-2 text-[11px] text-text-disabled">
+              Loading…
+            </div>
+          ) : (
+            members.data?.map((m) => (
+              <button
+                key={m.userId}
+                type="button"
+                onClick={() => toggle(m.userId)}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
+                  selected.has(m.userId) ? "text-text-1" : "text-text-3"
+                }`}
+              >
+                <span className="truncate">
+                  {m.user.name ?? m.user.email}
+                </span>
+                {selected.has(m.userId) ? (
+                  <span className="ml-auto">
+                    <Icon
+                      name="check"
+                      size={10}
+                      className="text-text-disabled"
+                    />
+                  </span>
+                ) : null}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* --------------------------------- tags ---------------------------------- */
+
+function TagsPicker({
+  task,
+  onChanged,
+}: {
+  task: Task;
+  onChanged: () => void;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const vocab = useQuery({
+    queryKey: ["project-tags", task.projectId],
+    queryFn: () => api.projectTags(task.projectId),
+  });
+
+  const invalidateAll = () => {
+    onChanged();
+    qc.invalidateQueries({ queryKey: ["project-tags", task.projectId] });
+    qc.invalidateQueries({ queryKey: ["board", task.projectId] });
+  };
+
+  const apply = useMutation({
+    mutationFn: (tagId: string) => api.applyTaskTag(task.id, tagId),
+    onSuccess: invalidateAll,
+    onError: (err) => toastError(err),
+  });
+  const remove = useMutation({
+    mutationFn: (tagId: string) => api.removeTaskTag(task.id, tagId),
+    onSuccess: invalidateAll,
+    onError: (err) => toastError(err),
+  });
+  const create = useMutation({
+    mutationFn: (name: string) =>
+      api.createProjectTag(task.projectId, { name }),
+    onSuccess: async (tag) => {
+      setQ("");
+      apply.mutate(tag.id);
+    },
+    onError: (err) => toastError(err),
+  });
+  const rename = useMutation({
+    mutationFn: (v: { id: string; name: string }) =>
+      api.patchProjectTag(v.id, { name: v.name }),
+    onSuccess: invalidateAll,
+    onError: (err) => toastError(err),
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api.deleteProjectTag(id),
+    onSuccess: invalidateAll,
+    onError: (err) => toastError(err),
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) =>
+      e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const applied = new Set((task.tags ?? []).map((t) => t.id));
+  const query = q.trim();
+  const matches = (vocab.data ?? []).filter((t) =>
+    query ? t.name.toLowerCase().includes(query.toLowerCase()) : true,
+  );
+  const exact = matches.find(
+    (t) => t.name.toLowerCase() === query.toLowerCase(),
+  );
+
+  return (
+    <div ref={wrapRef} className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-1">
+        {(task.tags ?? []).map((tag) => (
+          <span
+            key={tag.id}
+            className={`inline-flex items-center gap-1 rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
+          >
+            {tag.name}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                remove.mutate(tag.id);
+              }}
+              className="opacity-60 hover:opacity-100"
+              aria-label={`Remove ${tag.name}`}
+            >
+              <Icon name="x" size={9} />
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1"
+        >
+          + tag
+        </button>
+      </div>
+
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+6px)] z-30 w-64 overflow-hidden rounded-md border border-border-1 bg-surface-1 shadow-xl">
+          <input
+            // biome-ignore lint/a11y/noAutofocus: focus what user opened
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && query && !exact) {
+                e.preventDefault();
+                create.mutate(query);
+              }
+            }}
+            placeholder="Find or create…"
+            className="w-full border-b border-border-1 bg-transparent px-3 py-2 text-[12px] text-text-1 outline-none placeholder:text-text-disabled"
+          />
+          <div className="max-h-64 overflow-y-auto py-1">
+            {vocab.isPending ? (
+              <div className="px-3 py-2 text-[11px] text-text-disabled">
+                Loading…
+              </div>
+            ) : matches.length === 0 && !query ? (
+              <div className="px-3 py-2 text-[11px] text-text-disabled">
+                No tags yet. Type to create one.
+              </div>
+            ) : (
+              matches.map((tag) => (
+                <TagsRow
+                  key={tag.id}
+                  tag={tag}
+                  applied={applied.has(tag.id)}
+                  onToggle={() => {
+                    if (applied.has(tag.id)) remove.mutate(tag.id);
+                    else apply.mutate(tag.id);
+                  }}
+                  onRename={(name) => rename.mutate({ id: tag.id, name })}
+                  onDelete={() => {
+                    if (
+                      confirm(
+                        `Delete "${tag.name}"? It will be removed from every card in this project.`,
+                      )
+                    ) {
+                      del.mutate(tag.id);
+                    }
+                  }}
+                />
+              ))
+            )}
+            {query && !exact ? (
+              <button
+                type="button"
+                onClick={() => create.mutate(query)}
+                className="flex w-full items-center gap-2 border-t border-border-1 px-3 py-2 text-left text-[12px] text-text-3 hover:bg-white/[0.05]"
+              >
+                <Icon name="plus" size={10} />
+                Create “{query}”
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TagsRow({
+  tag,
+  applied,
+  onToggle,
+  onRename,
+  onDelete,
+}: {
+  tag: ProjectTag;
+  applied: boolean;
+  onToggle: () => void;
+  onRename: (name: string) => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(tag.name);
+  useEffect(() => setValue(tag.name), [tag.name]);
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        <input
+          // biome-ignore lint/a11y/noAutofocus: focus what user opened
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={() => {
+            const v = value.trim();
+            if (v && v !== tag.name) onRename(v);
+            setEditing(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+            if (e.key === "Escape") {
+              setValue(tag.name);
+              setEditing(false);
+            }
+          }}
+          className="flex-1 rounded border border-border-2 bg-transparent px-1.5 py-0.5 text-[12px] text-text-1 outline-none"
+        />
+      </div>
+    );
+  }
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: row layout with two actionable areas
+    <div
+      className="group flex items-center gap-2 px-2 py-1"
+      onDoubleClick={() => setEditing(true)}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`flex flex-1 items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-white/[0.05] ${
+          applied ? "text-text-1" : "text-text-3"
+        }`}
+        title="Click to toggle · double-click to rename"
+      >
+        <span
+          className={`inline-flex rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
+        >
+          {tag.name}
+        </span>
+        {applied ? (
+          <span className="ml-auto">
+            <Icon name="check" size={10} className="text-text-disabled" />
+          </span>
+        ) : null}
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete ${tag.name}`}
+        className="grid h-5 w-5 place-items-center rounded text-text-disabled opacity-0 transition-colors group-hover:opacity-100 hover:text-rose-300"
+        title="Delete"
+      >
+        <Icon name="trash" size={11} />
+      </button>
     </div>
   );
 }

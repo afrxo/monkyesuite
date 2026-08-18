@@ -9,6 +9,7 @@ import type {
   Board,
   BoardLane,
   CreateTaskInput,
+  ProjectTag,
   Task,
   TaskStatus,
 } from "@monkyesuite/shared";
@@ -25,8 +26,9 @@ import {
 import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
+import { milestoneColor } from "./milestone-color";
 import { shortTaskId } from "./short-id";
-import { TAG_CHIP, tagFromTitle } from "./tag";
+import { tagChipClass } from "./tag";
 
 const VISIBLE_LANES: TaskStatus[] = [
   "backlog",
@@ -126,7 +128,33 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
   const [query, setQuery] = useState("");
   const [addingIn, setAddingIn] = useState<TaskStatus | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [tagFilter, setTagFilter] = useState<Set<string>>(() => new Set());
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Vocabulary + per-tag card count, computed from the board so filter chips
+  // read directly from what's on screen (no second fetch needed just to list).
+  const tagVocab: { tag: ProjectTag; count: number }[] = (() => {
+    const by = new Map<string, { tag: ProjectTag; count: number }>();
+    for (const lane of board.lanes) {
+      for (const t of lane.tasks) {
+        for (const tag of t.tags ?? []) {
+          const prev = by.get(tag.id);
+          if (prev) prev.count += 1;
+          else by.set(tag.id, { tag, count: 1 });
+        }
+      }
+    }
+    return [...by.values()].sort((a, b) =>
+      a.tag.name.localeCompare(b.tag.name),
+    );
+  })();
+  const toggleTag = (id: string) =>
+    setTagFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const lanes: TaskStatus[] = showArchived
     ? [...VISIBLE_LANES, "archived"]
@@ -212,6 +240,13 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
   const matches = (t: Task): boolean => {
     if (milestoneFilter !== "all" && t.milestoneId !== milestoneFilter)
       return false;
+    // AND semantics: a card matches only if it carries every selected tag.
+    if (tagFilter.size > 0) {
+      const taskTagIds = new Set((t.tags ?? []).map((tag) => tag.id));
+      for (const wanted of tagFilter) {
+        if (!taskTagIds.has(wanted)) return false;
+      }
+    }
     if (!q) return true;
     const id = shortTaskId(projectSlug, t.id).toLowerCase();
     return (
@@ -278,6 +313,42 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
           </span>
         </label>
       </div>
+
+      {tagVocab.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border-1 bg-surface-0 px-5 py-2">
+          <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
+            Tags
+          </span>
+          {tagVocab.map(({ tag, count }) => {
+            const on = tagFilter.has(tag.id);
+            return (
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() => toggleTag(tag.id)}
+                className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] transition-opacity ${tagChipClass(tag)} ${
+                  on ? "" : "opacity-60 hover:opacity-100"
+                }`}
+                title={on ? `Remove filter: ${tag.name}` : `Filter: ${tag.name}`}
+              >
+                {tag.name}
+                <span className="ml-1 font-mono text-[9px] opacity-70">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+          {tagFilter.size > 0 ? (
+            <button
+              type="button"
+              onClick={() => setTagFilter(new Set())}
+              className="ml-1 rounded px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1"
+            >
+              clear
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div
         className="grid flex-1 min-h-0 gap-px overflow-hidden bg-border-1"
@@ -437,7 +508,6 @@ function Card({
   onOpen?: () => void;
 }) {
   const draggedRef = useRef(false);
-  const tag = tagFromTitle(task.title);
   const id = shortTaskId(projectSlug, task.id);
 
   const handleDrop = (e: DragEvent) => {
@@ -484,25 +554,32 @@ function Card({
       <div className="p-3">
       <div className="mb-2 pr-5 text-text-1">{task.title}</div>
       <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-text-disabled">
-        <span>{id}</span>
-        {tag ? (
+        {(task.tags ?? []).map((tag) => (
           <span
-            className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${TAG_CHIP[tag]}`}
+            key={tag.id}
+            className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
           >
-            {tag}
+            {tag.name}
           </span>
-        ) : null}
-        {milestoneName ? (
+        ))}
+        {milestoneName && task.milestoneId ? (
           <span
             title={`Milestone: ${milestoneName}`}
-            className="rounded-[8px] bg-accent-warm-soft px-1.5 py-px text-[10px] tracking-[0.04em] text-accent-warm"
+            className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${milestoneColor(task.milestoneId).chip}`}
           >
             {milestoneName}
           </span>
         ) : null}
-        {task.assignee ? (
-          <span className="ml-auto flex">
-            <MiniAvatar name={task.assignee.name ?? task.assignee.email} />
+        {(task.assignees ?? []).length > 0 ? (
+          <span className="ml-auto flex -space-x-1">
+            {(task.assignees ?? []).slice(0, 3).map((a) => (
+              <MiniAvatar key={a.id} name={a.name ?? a.email} />
+            ))}
+            {(task.assignees ?? []).length > 3 ? (
+              <span className="grid h-5 w-5 place-items-center rounded-full border-[1.5px] border-surface-0 bg-surface-hover text-[9px] font-semibold text-text-3">
+                +{(task.assignees ?? []).length - 3}
+              </span>
+            ) : null}
           </span>
         ) : null}
       </div>
@@ -669,7 +746,7 @@ function MenuItem({
   );
 }
 
-function MiniAvatar({ name }: { name: string }) {
+export function MiniAvatar({ name }: { name: string }) {
   const initials = name
     .split(/[\s@._-]+/)
     .filter(Boolean)

@@ -1,24 +1,52 @@
-// Card tag vocabulary — mirrors the tokens in styles.css (--tag-*). Kept small
-// and closed: filter chips and card chips both draw from this list, and tags
-// are derived from the task title (case-insensitive first-match). Widening it
-// means adding a token + an entry here; no schema change.
+// Card-tag color palette. A ProjectTag either carries an explicit palette key
+// (chosen by the user) or is null → a stable color derived from the tag id/name
+// hash so labels stay visually distinct without asking the creator to pick.
 
-export const TAG_KEYS = ["combat", "ui", "audio", "net"] as const;
-export type TagKey = (typeof TAG_KEYS)[number];
+import type { ProjectTag } from "@monkyesuite/shared";
 
-const RE = new RegExp(`\\b(${TAG_KEYS.join("|")})\\b`, "i");
+// Kept small on purpose — a wider set becomes noise, not information.
+export const TAG_PALETTE = [
+  "combat",
+  "ui",
+  "audio",
+  "net",
+  "warm",
+  "cool",
+  "moss",
+  "plum",
+] as const;
+export type TagColor = (typeof TAG_PALETTE)[number];
 
-export function tagFromTitle(title: string): TagKey | null {
-  const m = title.match(RE);
-  if (!m?.[1]) return null;
-  const k = m[1].toLowerCase() as TagKey;
-  return TAG_KEYS.includes(k) ? k : null;
-}
-
-// Semantic color classes — background wash + text color. Hexes live in tokens.
-export const TAG_CHIP: Record<TagKey, string> = {
+// bg wash + text color. Tokens live in styles.css; fallback keys reuse existing
+// tag/accent tokens so no CSS change is needed to add the new labels feature.
+export const TAG_CHIP: Record<TagColor, string> = {
   combat: "bg-tag-combat/10 text-tag-combat",
   ui: "bg-tag-ui/10 text-tag-ui",
   audio: "bg-tag-audio/10 text-tag-audio",
   net: "bg-tag-net/10 text-tag-net",
+  warm: "bg-accent-warm-soft text-accent-warm",
+  cool: "bg-tag-net/10 text-tag-net",
+  moss: "bg-tag-audio/10 text-tag-audio",
+  plum: "bg-tag-combat/10 text-tag-combat",
 };
+
+// FNV-1a-ish hash so a null color still resolves to a stable palette slot.
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h * 16777619) >>> 0;
+  }
+  return h;
+}
+
+export function tagColorOf(tag: ProjectTag): TagColor {
+  if (tag.color && (TAG_PALETTE as readonly string[]).includes(tag.color)) {
+    return tag.color as TagColor;
+  }
+  return TAG_PALETTE[hashStr(tag.id || tag.name) % TAG_PALETTE.length]!;
+}
+
+export function tagChipClass(tag: ProjectTag): string {
+  return TAG_CHIP[tagColorOf(tag)];
+}

@@ -87,6 +87,9 @@ grant select, insert, update, delete on
   task_checklist_items,
   task_attachments,
   task_activity,
+  project_tags,
+  task_tags,
+  task_assignees,
   docs,
   notes,
   project_game,
@@ -116,6 +119,7 @@ do $$ begin
     grant execute on function project_of_milestone(uuid) to monkye_app;
     grant execute on function project_of_doc(uuid) to monkye_app;
     grant execute on function project_of_note(uuid) to monkye_app;
+    grant execute on function project_of_project_tag(uuid) to monkye_app;
     grant execute on function create_project(text, text, text, text) to monkye_app;
     grant execute on function remove_member(uuid, text) to monkye_app;
   end if;

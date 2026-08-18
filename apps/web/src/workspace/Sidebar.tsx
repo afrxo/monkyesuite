@@ -18,7 +18,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
-import { TAG_KEYS } from "./tag";
+import { milestoneColor } from "./milestone-color";
 
 type Props = {
   projectId: string;
@@ -51,7 +51,6 @@ export function Sidebar({
         onCreate={onCreateDoc}
       />
       <RefSection projectId={projectId} />
-      <TagSection />
     </aside>
   );
 }
@@ -263,7 +262,7 @@ function MilestoneSection({
           onClick={() => onSelect(active === m.id ? "all" : m.id)}
           glyph={
             <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${active === m.id ? "bg-accent-warm" : "bg-text-disabled"}`}
+              className={`inline-block h-1.5 w-1.5 rounded-full ${milestoneColor(m.id).dot}`}
             />
           }
           count={countFor(m.id)}
@@ -329,13 +328,20 @@ function RefSection({ projectId }: { projectId: string }) {
     queryKey: ["project-games", projectId],
     queryFn: () => api.projectGames(projectId),
   });
+  const invalidate = () =>
+    qc.invalidateQueries({ queryKey: ["project-games", projectId] });
   const link = useMutation({
     mutationFn: (input: CreateProjectGameInput) =>
       api.linkGame(projectId, input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["project-games", projectId] });
+      invalidate();
       setOpen(false);
     },
+    onError: (err) => toastError(err),
+  });
+  const unlink = useMutation({
+    mutationFn: (universeId: number) => api.unlinkGame(projectId, universeId),
+    onSuccess: invalidate,
     onError: (err) => toastError(err),
   });
 
@@ -343,26 +349,17 @@ function RefSection({ projectId }: { projectId: string }) {
     <section className="ws-section mb-5">
       <SectionHead label="Refs" onAdd={() => setOpen((v) => !v)} />
       {games.data?.map((g: ProjectGame) => (
-        <Link
+        <RefRow
           key={g.universeId}
-          to="/games/$id"
-          params={{ id: String(g.universeId) }}
-          title={g.note ?? undefined}
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-3 hover:bg-white/[0.04] hover:text-text-1 transition-colors"
-        >
-          {g.iconUrl ? (
-            <img
-              src={g.iconUrl}
-              alt=""
-              className="h-4 w-4 shrink-0 rounded-sm object-cover"
-            />
-          ) : (
-            <span className="grid h-4 w-4 place-items-center rounded-sm bg-white/[0.06] text-[10px] font-bold text-text-1">
-              {g.name.slice(0, 1).toUpperCase()}
-            </span>
-          )}
-          <span className="truncate">{g.name}</span>
-        </Link>
+          game={g}
+          onEditNote={(note) =>
+            link.mutate({ universeId: g.universeId, note: note || undefined })
+          }
+          onUnlink={() => {
+            if (confirm(`Unpin “${g.name}” from this project?`))
+              unlink.mutate(g.universeId);
+          }}
+        />
       ))}
       {open ? (
         <RefForm
@@ -376,47 +373,161 @@ function RefSection({ projectId }: { projectId: string }) {
   );
 }
 
-function TagSection() {
-  // Static chips for this pass — filter wiring is out of scope (mirrors the
-  // disabled List/Timeline tabs in the board header). Kept visible so the
-  // affordance is discoverable; hover tooltip explains.
+function RefRow({
+  game,
+  onEditNote,
+  onUnlink,
+}: {
+  game: ProjectGame;
+  onEditNote: (note: string) => void;
+  onUnlink: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setMenuOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
   return (
-    <section className="ws-section mb-5">
-      <SectionHead label="Filter tags" />
-      <div className="flex flex-wrap gap-1.5 px-2">
-        <TagChip active>all</TagChip>
-        {TAG_KEYS.map((k) => (
-          <TagChip key={k} disabled title="tag filter coming soon">
-            {k}
-          </TagChip>
-        ))}
-      </div>
-    </section>
+    <div
+      ref={wrapRef}
+      className="group relative flex w-full items-start gap-2 rounded px-2 py-1.5 text-sm text-text-3 hover:bg-white/[0.04] hover:text-text-1 transition-colors"
+    >
+      <Link
+        to="/games/$id"
+        params={{ id: String(game.universeId) }}
+        className="flex min-w-0 flex-1 items-start gap-2"
+      >
+        {game.iconUrl ? (
+          <img
+            src={game.iconUrl}
+            alt=""
+            className="mt-0.5 h-4 w-4 shrink-0 rounded-sm object-cover"
+          />
+        ) : (
+          <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-sm bg-white/[0.06] text-[10px] font-bold text-text-1">
+            {game.name.slice(0, 1).toUpperCase()}
+          </span>
+        )}
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate">{game.name}</span>
+          {editing ? null : game.note ? (
+            <span className="mt-0.5 line-clamp-2 text-[11px] leading-[1.35] text-text-disabled">
+              {game.note}
+            </span>
+          ) : null}
+        </span>
+      </Link>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setMenuOpen((v) => !v);
+        }}
+        aria-label="Actions"
+        className={`grid h-5 w-5 shrink-0 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors ${
+          menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}
+      >
+        <Icon name="more" size={12} />
+      </button>
+      {menuOpen ? (
+        <div className="absolute right-1 top-7 z-10 w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              setEditing(true);
+            }}
+            className="block w-full px-3 py-2 text-left text-xs text-text-3 hover:bg-white/[0.05] transition-colors"
+          >
+            Edit note
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              onUnlink();
+            }}
+            className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05] transition-colors"
+          >
+            Unpin
+          </button>
+        </div>
+      ) : null}
+      {editing ? (
+        <div className="absolute inset-x-2 top-full z-10 mt-1">
+          <RefNoteEditor
+            initial={game.note ?? ""}
+            onSubmit={(v) => {
+              onEditNote(v);
+              setEditing(false);
+            }}
+            onCancel={() => setEditing(false)}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
-function TagChip({
-  children,
-  active,
-  disabled,
-  title,
+function RefNoteEditor({
+  initial,
+  onSubmit,
+  onCancel,
 }: {
-  children: React.ReactNode;
-  active?: boolean;
-  disabled?: boolean;
-  title?: string;
+  initial: string;
+  onSubmit: (v: string) => void;
+  onCancel: () => void;
 }) {
+  const [v, setV] = useState(initial);
   return (
-    <span
-      title={title}
-      className={`rounded-[10px] border px-2 py-0.5 font-mono text-xs ${
-        active
-          ? "border-text-1 bg-text-1 text-surface-0"
-          : "border-border-2 text-text-3"
-      } ${disabled ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit(v.trim());
+      }}
+      className="flex flex-col gap-1 rounded-md border border-border-1 bg-surface-1 p-1.5 shadow-lg"
     >
-      {children}
-    </span>
+      <input
+        // biome-ignore lint/a11y/noAutofocus: focus what user opened
+        autoFocus
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onCancel()}
+        placeholder="Why pinned"
+        className="rounded border border-border-1 bg-surface-0 px-2 py-1 text-xs text-text-1 outline-none focus:border-text-5"
+      />
+      <div className="flex gap-1">
+        <button
+          type="submit"
+          className="rounded bg-text-1 px-2 py-0.5 text-[10px] font-medium text-surface-0"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded px-2 py-0.5 text-[10px] text-text-3 hover:bg-white/[0.05]"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

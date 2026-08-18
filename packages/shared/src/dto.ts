@@ -281,6 +281,17 @@ export interface TaskGameRef {
   iconUrl: string | null;
 }
 
+// Per-project card label (distinct from the global `Tag` above, which describes
+// games with a controlled 5-axis vocabulary). Free-form, renameable.
+export interface ProjectTag {
+  id: string;
+  projectId: string;
+  name: string;
+  color: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -291,8 +302,9 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   orderKey: string;
-  assigneeId: string | null;
-  assignee: { id: string; name: string | null; email: string } | null;
+  // Cards can carry any number of members (specs/05). The legacy single-column
+  // assigneeId/assignee shape was replaced by this list in migration 0010.
+  assignees: { id: string; name: string | null; email: string }[];
   universeId: number | null;
   game: TaskGameRef | null;
   createdBy: string;
@@ -300,6 +312,7 @@ export interface Task {
   updatedAt: string;
   dueAt: string | null;
   coverUrl: string | null;
+  tags: ProjectTag[];
   // One level of subtasks only (specs/05 §5.1). Present on top-level cards.
   subtasks: Task[];
 }
@@ -424,6 +437,7 @@ export interface ProjectNote {
   universeId: number | null;
   game: TaskGameRef | null;
   createdBy: string;
+  author: { id: string; name: string | null; email: string } | null;
   createdAt: string;
   updatedAt: string;
 }
