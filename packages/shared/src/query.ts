@@ -274,6 +274,25 @@ const emptyProps = z.object({}).strict();
 const headingProps = z.object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]) }).strict();
 const checkProps = z.object({ checked: z.boolean() }).strict();
 
+// Non-text block content shapes. Code stores raw text; image / divider have
+// no textual content and lean on props for state.
+const codeContent = z.object({ text: z.string().max(100_000) }).strict();
+const emptyContent = z.object({}).strict();
+const codeProps = z
+  .object({
+    language: z.string().max(40).optional(),
+    // BlockNote's defaults include layout props; accept them opaquely.
+  })
+  .catchall(z.unknown());
+const imageProps = z
+  .object({
+    url: z.string().url().or(z.literal("")),
+    caption: z.string().max(400).optional(),
+    name: z.string().max(240).optional(),
+    previewWidth: z.number().nonnegative().optional(),
+  })
+  .catchall(z.unknown());
+
 // Validated block-input schema (used by upsert). Discriminated on `type` so
 // wrong-shape blocks are rejected before touching the DB.
 export const blockInputSchema = z.discriminatedUnion("type", [
@@ -331,6 +350,33 @@ export const blockInputSchema = z.discriminatedUnion("type", [
     content: textContentSchema,
     props: emptyProps,
   }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("codeBlock"),
+    content: codeContent,
+    props: codeProps,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("divider"),
+    content: emptyContent,
+    props: emptyProps,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("image"),
+    content: emptyContent,
+    props: imageProps,
+  }),
 ]);
 export type BlockInput = z.infer<typeof blockInputSchema>;
 
@@ -357,12 +403,19 @@ export type PatchDocMetaInput = z.infer<typeof patchDocMetaSchema>;
 
 /* --------------------------- project-note writes -------------------------- */
 
-// A short pin needs at least a title or a body — not an empty row.
+// A short pin needs at least a title or a body — not an empty row. Anchor
+// fields are all-or-nothing: passing any of docId/blockId/anchorStart/anchorEnd
+// implies an anchored note; the API enforces consistency (see workspace.ts).
 export const createNoteSchema = z
   .object({
     title: z.string().max(200).optional(),
     body: z.string().max(5000).optional(),
     universeId: universeLink.optional(),
+    docId: z.string().uuid().optional(),
+    blockId: z.string().uuid().optional(),
+    anchorStart: z.number().int().nonnegative().optional(),
+    anchorEnd: z.number().int().nonnegative().optional(),
+    anchorQuote: z.string().max(500).optional(),
   })
   .refine((v) => Boolean(v.title?.trim() || v.body?.trim()), "note is empty");
 export type CreateNoteInput = z.infer<typeof createNoteSchema>;
@@ -372,6 +425,7 @@ export const patchNoteSchema = z
     title: z.string().max(200).nullable().optional(),
     body: z.string().max(5000).nullable().optional(),
     universeId: universeLink.optional(),
+    resolved: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, "no fields to update");
 export type PatchNoteInput = z.infer<typeof patchNoteSchema>;

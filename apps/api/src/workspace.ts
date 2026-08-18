@@ -42,8 +42,17 @@ import { resolveItemAccess, resolveProjectAccess } from "./access.js";
 import { markdownToBlocks } from "./blocks/markdownToBlocks.js";
 import { conflict, notFound, validationError } from "./errors.js";
 import { type AppEnv, requireUser } from "./middleware.js";
+import { buildDocMediaKey, presignPutUrl, publicUrlFor } from "./r2.js";
 import { isoReq } from "./serialize.js";
 import { type Tx, withUser } from "./tx.js";
+
+const IMAGE_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+]);
 
 const mapBlock = (b: typeof blocksTable.$inferSelect): Block => ({
   id: b.id,
@@ -51,7 +60,7 @@ const mapBlock = (b: typeof blocksTable.$inferSelect): Block => ({
   parentId: b.parentId,
   position: b.position,
   type: b.type as Block["type"],
-  content: b.content as TextBlockContent,
+  content: (b.content as TextBlockContent | Record<string, unknown>) ?? {},
   props: (b.props as Record<string, unknown>) ?? {},
   version: b.version,
   createdAt: isoReq(b.createdAt),
@@ -196,6 +205,12 @@ function mapNote(
       n.universeId && game
         ? { universeId: n.universeId, name: game.name, iconUrl: game.iconUrl }
         : null,
+    docId: n.docId,
+    blockId: n.blockId,
+    anchorStart: n.anchorStart,
+    anchorEnd: n.anchorEnd,
+    anchorQuote: n.anchorQuote,
+    resolved: n.resolved,
     createdBy: n.createdBy,
     author,
     createdAt: isoReq(n.createdAt),
@@ -338,6 +353,37 @@ export function workspaceRoutes(): Hono<AppEnv> {
       await tx.delete(docs).where(eq(docs.id, id));
     });
     return c.body(null, 204);
+  });
+
+  /* --------------------------- doc media uploads ------------------------- */
+  // Presigned PUT for a doc cover or an inline image. Client uploads directly
+  // to R2 and then persists the returned publicUrl on the doc (cover) or in
+  // the image block's `url` prop. R2_PUBLIC_URL_BASE MUST be configured — the
+  // block editor stores permanent URLs, not per-view presigned GETs.
+  r.post("/docs/:id/uploads", async (c) => {
+    const userId = requireUser(c);
+    const id = uuidSchema.parse(c.req.param("id"));
+    const raw = (await c.req.json().catch(() => ({}))) as {
+      fileName?: unknown;
+      mimeType?: unknown;
+    };
+    const fileName =
+      typeof raw.fileName === "string" ? raw.fileName : "file";
+    const mimeType =
+      typeof raw.mimeType === "string" ? raw.mimeType : "";
+    if (!IMAGE_MIME.has(mimeType))
+      throw validationError("Unsupported image type.");
+    await withUser(userId, async (tx) => {
+      await resolveItemAccess(tx, "doc", id, userId);
+    });
+    const key = buildDocMediaKey(id, fileName);
+    const url = publicUrlFor(key);
+    if (!url)
+      throw validationError(
+        "Doc media upload requires R2_PUBLIC_URL_BASE to be configured on the API.",
+      );
+    const put = await presignPutUrl(key, mimeType);
+    return c.json({ uploadUrl: put.url, publicUrl: url });
   });
 
   /* -------------------------- doc meta (icon, cover) --------------------- */
@@ -703,13 +749,55 @@ export function workspaceRoutes(): Hono<AppEnv> {
     if (!body.success) throw validationError("Invalid note.");
     const note = await withUser(userId, async (tx): Promise<ProjectNote> => {
       await resolveProjectAccess(tx, id, userId);
+      const d = body.data;
+      // Anchor sanity: if any anchor field is present, docId is required. If
+      // anchorStart is present, anchorEnd must be too and >= start. If blockId
+      // is present, docId is required and the block must belong to that doc.
+      const hasAnchorField =
+        d.blockId !== undefined ||
+        d.anchorStart !== undefined ||
+        d.anchorEnd !== undefined ||
+        d.anchorQuote !== undefined;
+      if (hasAnchorField && !d.docId)
+        throw validationError("Anchor requires docId.");
+      if (
+        (d.anchorStart !== undefined || d.anchorEnd !== undefined) &&
+        (d.anchorStart === undefined ||
+          d.anchorEnd === undefined ||
+          d.anchorEnd < d.anchorStart)
+      )
+        throw validationError("Invalid anchor range.");
+      if (d.docId) {
+        // Verify the doc is in this project (RLS also enforces).
+        const [doc] = await tx
+          .select({ projectId: docs.projectId })
+          .from(docs)
+          .where(eq(docs.id, d.docId))
+          .limit(1);
+        if (!doc || doc.projectId !== id)
+          throw validationError("docId not in this project.");
+        if (d.blockId) {
+          const [b] = await tx
+            .select({ docId: blocksTable.docId })
+            .from(blocksTable)
+            .where(eq(blocksTable.id, d.blockId))
+            .limit(1);
+          if (!b || b.docId !== d.docId)
+            throw validationError("blockId not in the given doc.");
+        }
+      }
       const [row] = await tx
         .insert(notes)
         .values({
           projectId: id,
-          title: body.data.title ?? null,
-          body: body.data.body ?? null,
-          universeId: body.data.universeId ?? null,
+          title: d.title ?? null,
+          body: d.body ?? null,
+          universeId: d.universeId ?? null,
+          docId: d.docId ?? null,
+          blockId: d.blockId ?? null,
+          anchorStart: d.anchorStart ?? null,
+          anchorEnd: d.anchorEnd ?? null,
+          anchorQuote: d.anchorQuote ?? null,
           createdBy: userId,
         })
         .returning();
@@ -737,6 +825,7 @@ export function workspaceRoutes(): Hono<AppEnv> {
           ...(d.title !== undefined ? { title: d.title } : {}),
           ...(d.body !== undefined ? { body: d.body } : {}),
           ...(d.universeId !== undefined ? { universeId: d.universeId } : {}),
+          ...(d.resolved !== undefined ? { resolved: d.resolved } : {}),
           updatedAt: new Date(),
         })
         .where(eq(notes.id, id))

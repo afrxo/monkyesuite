@@ -1214,6 +1214,18 @@ export const notes = pgTable(
       () => games.universeId,
       { onDelete: "set null" },
     ),
+    // Anchoring (Phase 5, doc-editor rewrite): a note pinned to a specific
+    // block (docId + blockId + [start,end)) surfaces both in the notes rail
+    // and as a highlight in the editor. All null → the historic project-level
+    // pin. `resolved` hides the note by default without deleting it.
+    docId: uuid("doc_id").references(() => docs.id, { onDelete: "cascade" }),
+    blockId: uuid("block_id").references(() => blocks.id, {
+      onDelete: "set null",
+    }),
+    anchorStart: integer("anchor_start"),
+    anchorEnd: integer("anchor_end"),
+    anchorQuote: text("anchor_quote"),
+    resolved: boolean("resolved").notNull().default(false),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -1227,6 +1239,8 @@ export const notes = pgTable(
   (t) => [
     index("notes_project_idx").on(t.projectId),
     index("notes_universe_idx").on(t.universeId),
+    index("notes_doc_idx").on(t.docId),
+    index("notes_block_idx").on(t.blockId),
     pgPolicy("notes_member_rw", {
       for: "all",
       using: memberOf(t.projectId),

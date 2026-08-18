@@ -58,6 +58,28 @@ export function buildAttachmentKey(
   return `tasks/${taskId}/${attachmentId}/${safe}`;
 }
 
+// Doc covers + inline images uploaded from the block editor. Namespaced under
+// docs/ so it's obvious what a stray blob is for; the sub-uuid isolates each
+// upload so a re-upload with the same filename doesn't clobber the prior one.
+export function buildDocMediaKey(
+  docId: string,
+  fileName: string,
+): string {
+  const safe = fileName.replace(SAFE_NAME, "_").slice(0, 200) || "file";
+  const uid = crypto.randomUUID();
+  return `docs/${docId}/${uid}/${safe}`;
+}
+
+// Public URL for a stored key if R2_PUBLIC_URL_BASE is configured. Editor
+// images and doc covers need a URL that survives without a fresh presign on
+// every render, so we require a public base for the block editor's upload
+// flow to be enabled at all.
+export function publicUrlFor(key: string): string | null {
+  const base = process.env.R2_PUBLIC_URL_BASE;
+  if (!base) return null;
+  return `${base.replace(/\/$/, "")}/${key}`;
+}
+
 export async function presignPutUrl(
   key: string,
   mimeType: string,

@@ -456,17 +456,21 @@ export type BlockType =
   | "bulletListItem"
   | "numberedListItem"
   | "checkListItem"
-  | "quote";
+  | "quote"
+  | "codeBlock"
+  | "divider"
+  | "image";
 
-// The DB envelope. `content` and `props` shapes are enforced at the API
-// boundary; storing them as jsonb keeps new block types migration-free.
+// The DB envelope. `content` and `props` shapes vary by type; text-bearing
+// blocks store `{ runs }`, code stores `{ text }`, image/divider carry only
+// props. The API validates the shape per type before persisting.
 export interface Block {
   id: string;
   docId: string;
   parentId: string | null;
   position: string;
   type: BlockType;
-  content: TextBlockContent;
+  content: TextBlockContent | Record<string, unknown>;
   props: Record<string, unknown>;
   version: number;
   createdAt: string;
@@ -497,6 +501,14 @@ export interface ProjectNote {
   body: string | null;
   universeId: number | null;
   game: TaskGameRef | null;
+  // Anchoring. All null → project-level pin. `docId` alone → doc-level.
+  // `blockId + anchorStart + anchorEnd` → inline anchored comment.
+  docId: string | null;
+  blockId: string | null;
+  anchorStart: number | null;
+  anchorEnd: number | null;
+  anchorQuote: string | null;
+  resolved: boolean;
   createdBy: string;
   author: { id: string; name: string | null; email: string } | null;
   createdAt: string;

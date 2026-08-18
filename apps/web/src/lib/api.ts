@@ -233,6 +233,11 @@ export const api = {
 
   patchDocMeta: (docId: string, input: PatchDocMetaInput) =>
     patch<Doc>(`/docs/${docId}/meta`, input),
+  docMediaUpload: (docId: string, input: { fileName: string; mimeType: string }) =>
+    post<{ uploadUrl: string; publicUrl: string }>(
+      `/docs/${docId}/uploads`,
+      input,
+    ),
 
   // Blocks (Phase 1 block-native editor).
   docBlocks: (docId: string) => get<DocBlocks>(`/docs/${docId}/blocks`),

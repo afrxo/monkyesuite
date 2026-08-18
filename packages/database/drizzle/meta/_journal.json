@@ -92,6 +92,13 @@
       "when": 1787300000000,
       "tag": "0012_docs_blocks",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787400000000,
+      "tag": "0013_note_anchors",
+      "breakpoints": true
     }
   ]
 }
