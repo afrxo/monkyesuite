@@ -38,7 +38,7 @@ export function Sidebar({
   onCreateDoc,
 }: Props) {
   return (
-    <aside className="col-start-1 overflow-y-auto border-r border-border-1 px-3 py-4">
+    <aside className="no-scrollbar col-start-1 overflow-y-auto border-r border-border-1 px-3 py-4">
       <MilestoneSection
         projectId={projectId}
         active={activeMilestone}
