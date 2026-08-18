@@ -12,10 +12,18 @@ import type {
   DocFolder,
   Milestone,
   ProjectGame,
+  PulseSearchResult,
 } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
 import {
@@ -1196,31 +1204,192 @@ function RefForm({
   onSubmit: (universeId: number, note: string) => void;
   onCancel: () => void;
 }) {
-  const [uid, setUid] = useState("");
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [selected, setSelected] = useState<PulseSearchResult | null>(null);
   const [note, setNote] = useState("");
+  const [open, setOpen] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const noteRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (selected) return;
+    const t = setTimeout(() => setDebounced(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query, selected]);
+
+  const search = useQuery({
+    queryKey: ["gameSearch", debounced],
+    queryFn: () => api.pulseSearch(debounced),
+    enabled: !selected && debounced.length >= 2,
+    staleTime: 15_000,
+  });
+
+  const results = useMemo(() => search.data ?? [], [search.data]);
+  const showDropdown =
+    open && !selected && debounced.length >= 2 && !search.isFetching;
+  const showLoading =
+    open && !selected && debounced.length >= 2 && search.isFetching;
+
+  useEffect(() => {
+    setCursor(0);
+  }, []);
+
+  const pick = (r: PulseSearchResult) => {
+    setSelected(r);
+    setQuery(r.name);
+    setOpen(false);
+    setTimeout(() => noteRef.current?.focus(), 0);
+  };
+
+  const clear = () => {
+    setSelected(null);
+    setQuery("");
+    setDebounced("");
+    setOpen(true);
+  };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const n = Number(uid.trim());
-    if (Number.isInteger(n) && n > 0) onSubmit(n, note.trim());
+    if (selected) onSubmit(selected.id, note.trim());
   };
+
+  const onQueryKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      if (open) {
+        setOpen(false);
+      } else {
+        onCancel();
+      }
+      return;
+    }
+    if (!showDropdown || results.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCursor((c) => Math.min(c + 1, results.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCursor((c) => Math.max(c - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const r = results[cursor];
+      if (r) pick(r);
+    }
+  };
+
   return (
     <form onSubmit={submit} className="mt-1 flex flex-col gap-1 px-1.5">
+      <div className="relative">
+        <input
+          // biome-ignore lint/a11y/noAutofocus: focus what user opened
+          autoFocus
+          value={query}
+          onChange={(e) => {
+            const v = e.target.value;
+            setQuery(v);
+            if (selected && v !== selected.name) setSelected(null);
+            setOpen(true);
+            setCursor(0);
+          }}
+          onFocus={() => !selected && setOpen(true)}
+          onKeyDown={onQueryKey}
+          placeholder="Search game by name"
+          className="w-full rounded border border-border-1 bg-surface-1 px-2 py-1 pr-6 text-xs text-text-1 outline-none focus:border-text-5"
+        />
+        {selected ? (
+          <button
+            type="button"
+            onClick={clear}
+            aria-label="Clear selection"
+            className="absolute right-1 top-1/2 -translate-y-1/2 grid h-4 w-4 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1"
+          >
+            <Icon name="x" size={10} />
+          </button>
+        ) : null}
+        {showLoading ? (
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-text-disabled">
+            …
+          </div>
+        ) : null}
+        {showDropdown ? (
+          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
+            {results.length === 0 ? (
+              <div className="px-2 py-1.5 text-[11px] leading-tight text-text-disabled">
+                No tracked game matches. Scraper may not have picked it up yet.
+              </div>
+            ) : (
+              results.map((r, i) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onMouseEnter={() => setCursor(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(r);
+                  }}
+                  className={`flex w-full items-center gap-2 px-2 py-1 text-left text-xs ${
+                    i === cursor
+                      ? "bg-white/[0.05] text-text-1"
+                      : "text-text-3 hover:bg-white/[0.04]"
+                  }`}
+                >
+                  {r.thumbnail ? (
+                    <img
+                      src={r.thumbnail}
+                      alt=""
+                      className="h-4 w-4 shrink-0 rounded-sm object-cover"
+                    />
+                  ) : (
+                    <span className="grid h-4 w-4 shrink-0 place-items-center rounded-sm bg-white/[0.06] text-[10px] font-bold text-text-1">
+                      {r.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">{r.name}</span>
+                    <span className="truncate text-[10px] text-text-disabled">
+                      {r.creatorName}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-text-disabled">
+                    {formatCcu(r.ccu)}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        ) : null}
+      </div>
       <input
-        // biome-ignore lint/a11y/noAutofocus: focus what user opened
-        autoFocus
-        value={uid}
-        onChange={(e) => setUid(e.target.value)}
-        onKeyDown={(e) => e.key === "Escape" && onCancel()}
-        placeholder="Universe ID"
-        inputMode="numeric"
-        className="rounded border border-border-1 bg-surface-1 px-2 py-1 text-xs text-text-1 outline-none focus:border-text-5"
-      />
-      <input
+        ref={noteRef}
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="Why pinned (optional)"
-        className="rounded border border-border-1 bg-surface-1 px-2 py-1 text-xs text-text-1 outline-none focus:border-text-5"
+        onKeyDown={(e) => e.key === "Escape" && onCancel()}
+        placeholder={selected ? "Why pinned (optional)" : "Pick a game first"}
+        disabled={!selected}
+        className="rounded border border-border-1 bg-surface-1 px-2 py-1 text-xs text-text-1 outline-none focus:border-text-5 disabled:opacity-50"
       />
+      <div className="flex gap-1">
+        <button
+          type="submit"
+          disabled={!selected}
+          className="rounded bg-text-1 px-2 py-0.5 text-[10px] font-medium text-surface-0 disabled:opacity-40"
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded px-2 py-0.5 text-[10px] text-text-3 hover:bg-white/[0.05]"
+        >
+          Cancel
+        </button>
+      </div>
     </form>
   );
+}
+
+function formatCcu(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
