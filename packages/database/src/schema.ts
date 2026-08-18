@@ -1230,6 +1230,10 @@ export const notes = pgTable(
     anchorEnd: integer("anchor_end"),
     anchorQuote: text("anchor_quote"),
     resolved: boolean("resolved").notNull().default(false),
+    // Set to true when a re-anchor pass can no longer locate the anchor_quote
+    // inside its block. The note stays visible in the rail with a banner
+    // instead of disappearing silently.
+    orphaned: boolean("orphaned").notNull().default(false),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

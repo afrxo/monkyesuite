@@ -271,8 +271,19 @@ function NoteItem({
         </button>
       </div>
       {note.anchorQuote ? (
-        <blockquote className="mb-1 border-l-2 border-accent-warm/60 pl-2 text-[11px] italic text-text-3">
+        <blockquote
+          className={`mb-1 border-l-2 pl-2 text-[11px] italic ${
+            note.orphaned
+              ? "border-destructive/60 text-text-disabled line-through"
+              : "border-accent-warm/60 text-text-3"
+          }`}
+        >
           “{note.anchorQuote}”
+          {note.orphaned ? (
+            <span className="ml-1 not-italic text-destructive">
+              · content changed
+            </span>
+          ) : null}
         </blockquote>
       ) : null}
       {note.title ? (

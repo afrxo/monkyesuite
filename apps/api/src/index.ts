@@ -5,6 +5,7 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { startDocPurgeLoop } from "./blocks/purge.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const app = createApp();
@@ -14,3 +15,6 @@ serve({ fetch: app.fetch, port }, (info) => {
     `[api] listening on http://localhost:${info.port} (global reads)`,
   );
 });
+
+// Background sweep: hard-delete soft-deleted docs past the retention window.
+startDocPurgeLoop();

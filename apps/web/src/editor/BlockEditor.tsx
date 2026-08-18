@@ -883,6 +883,28 @@ function blockNoteToBlocks(
   return out;
 }
 
+function flattenBlockText(block: {
+  content?: unknown;
+}): string {
+  const content = block.content;
+  if (!Array.isArray(content)) return "";
+  let out = "";
+  for (const node of content as {
+    type?: string;
+    text?: string;
+    content?: unknown;
+  }[]) {
+    if (node.type === "text" && typeof node.text === "string") {
+      out += node.text;
+    } else if (node.type === "link" && Array.isArray(node.content)) {
+      for (const inner of node.content as { text?: string }[]) {
+        if (typeof inner.text === "string") out += inner.text;
+      }
+    }
+  }
+  return out;
+}
+
 /* ------------------------- anchored-note toolbar btn ---------------------- */
 
 function NoteAnchorButton({
@@ -904,6 +926,15 @@ function NoteAnchorButton({
         // Take the first block that contains the selection anchor; nested
         // selections spanning multiple blocks anchor to the top one.
         const block = editor.getTextCursorPosition().block;
+        // Compute anchor offsets against the block's flat text. The API
+        // requires start & end together; if the quote can't be located in
+        // the current block text we send only quote + blockId (unanchored).
+        const flat = flattenBlockText(block);
+        const idx = flat.indexOf(quote);
+        const withOffsets =
+          idx >= 0
+            ? { anchorStart: idx, anchorEnd: idx + quote.length }
+            : {};
         const body = window.prompt(`Note about "${quote.slice(0, 60)}":`);
         if (!body?.trim()) return;
         try {
@@ -912,6 +943,7 @@ function NoteAnchorButton({
             docId,
             blockId: block.id,
             anchorQuote: quote.slice(0, 500),
+            ...withOffsets,
           });
           qc.invalidateQueries({ queryKey: ["project-notes", projectId] });
         } catch (err) {

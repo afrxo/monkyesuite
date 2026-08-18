@@ -40,6 +40,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { resolveItemAccess, resolveProjectAccess } from "./access.js";
 import { markdownToBlocks } from "./blocks/markdownToBlocks.js";
+import { reAnchorNotesForBlocks } from "./blocks/reAnchor.js";
 import { conflict, notFound, validationError } from "./errors.js";
 import { type AppEnv, requireUser } from "./middleware.js";
 import { buildDocMediaKey, presignPutUrl, publicUrlFor } from "./r2.js";
@@ -212,6 +213,7 @@ function mapNote(
     anchorEnd: n.anchorEnd,
     anchorQuote: n.anchorQuote,
     resolved: n.resolved,
+    orphaned: n.orphaned,
     createdBy: n.createdBy,
     author,
     createdAt: isoReq(n.createdAt),
@@ -577,6 +579,12 @@ export function workspaceRoutes(): Hono<AppEnv> {
         .update(docs)
         .set({ updatedAt: new Date() })
         .where(eq(docs.id, id));
+      // Snap any anchored notes to the fresh block text (or mark orphaned).
+      await reAnchorNotesForBlocks(
+        tx,
+        id,
+        incoming.map((b) => b.id),
+      );
       return { blocks: rows.map(mapBlock) };
     });
 

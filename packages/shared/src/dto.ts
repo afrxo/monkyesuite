@@ -512,6 +512,7 @@ export interface ProjectNote {
   anchorEnd: number | null;
   anchorQuote: string | null;
   resolved: boolean;
+  orphaned: boolean;
   createdBy: string;
   author: { id: string; name: string | null; email: string } | null;
   createdAt: string;

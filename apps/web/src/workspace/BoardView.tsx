@@ -51,6 +51,7 @@ const LANE_LABEL: Record<TaskStatus, string> = {
 };
 
 type Drag = { taskId: string; from: TaskStatus };
+type DropTarget = { status: TaskStatus; beforeId: string | null };
 type MilestoneFilter = string | "all";
 
 export interface BoardViewHandle {
@@ -129,6 +130,18 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
 ) {
   const qc = useQueryClient();
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const hoverBefore = (status: TaskStatus, beforeId: string | null) => {
+    setDropTarget((prev) =>
+      prev && prev.status === status && prev.beforeId === beforeId
+        ? prev
+        : { status, beforeId },
+    );
+  };
+  const clearDrag = () => {
+    setDrag(null);
+    setDropTarget(null);
+  };
   const [view, setView] = useState<"board" | "list" | "timeline">("board");
   const [query, setQuery] = useState("");
   const [addingIn, setAddingIn] = useState<TaskStatus | null>(null);
@@ -238,7 +251,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
     } else {
       move.mutate({ taskId: drag.taskId, status, prevId, nextId });
     }
-    setDrag(null);
+    clearDrag();
   }
 
   const q = query.trim().toLowerCase();
@@ -371,6 +384,13 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
               count={shown.length}
               onAdd={() => setAddingIn(status)}
               onDropEnd={() => drop(status, null)}
+              onHoverEnd={() => hoverBefore(status, null)}
+              isEndTarget={
+                !!drag &&
+                dropTarget?.status === status &&
+                dropTarget.beforeId === null
+              }
+              dragging={!!drag}
             >
               {shown.map((task) => (
                 <Card
@@ -385,7 +405,16 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
                       : null
                   }
                   onDragStart={() => setDrag({ taskId: task.id, from: status })}
+                  onDragCancel={clearDrag}
                   onDropBefore={() => drop(status, task.id)}
+                  onHoverBefore={() => hoverBefore(status, task.id)}
+                  isDropTarget={
+                    !!drag &&
+                    dropTarget?.status === status &&
+                    dropTarget.beforeId === task.id &&
+                    drag.taskId !== task.id
+                  }
+                  isDragging={drag?.taskId === task.id}
                   onChanged={onChanged}
                   onOpen={onOpenCard ? () => onOpenCard(task.id) : undefined}
                 />
@@ -443,30 +472,32 @@ function Lane({
   status,
   count,
   onDropEnd,
+  onHoverEnd,
+  isEndTarget,
+  dragging,
   onAdd,
   children,
 }: {
   status: TaskStatus;
   count: number;
   onDropEnd: () => void;
+  onHoverEnd: () => void;
+  isEndTarget: boolean;
+  dragging: boolean;
   onAdd: () => void;
   children: React.ReactNode;
 }) {
-  const [over, setOver] = useState(false);
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drag-drop lane target
     <div
-      className={`flex min-h-0 flex-col bg-[#0c0c0c] transition-shadow ${
-        over ? "ring-1 ring-inset ring-text-5" : ""
+      className={`flex min-h-0 flex-col bg-[#0c0c0c] ${
+        dragging ? "ring-1 ring-inset ring-border-2" : ""
       }`}
       onDragOver={(e) => {
         e.preventDefault();
-        setOver(true);
       }}
-      onDragLeave={() => setOver(false)}
       onDrop={(e) => {
         e.preventDefault();
-        setOver(false);
         onDropEnd();
       }}
     >
@@ -488,6 +519,29 @@ function Lane({
       </div>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2.5">
         {children}
+        {dragging ? (
+          // biome-ignore lint/a11y/noStaticElementInteractions: drop-end zone
+          <div
+            className="min-h-[40px] flex-1"
+            onDragOver={(e) => {
+              e.preventDefault();
+              onHoverEnd();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDropEnd();
+            }}
+          >
+            <div
+              className={`h-[2px] rounded-full transition-opacity duration-75 ${
+                isEndTarget
+                  ? "bg-accent-warm opacity-100"
+                  : "bg-transparent opacity-0"
+              }`}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -499,7 +553,11 @@ function Card({
   projectSlug,
   milestoneName,
   onDragStart,
+  onDragCancel,
   onDropBefore,
+  onHoverBefore,
+  isDropTarget,
+  isDragging,
   onChanged,
   onOpen,
 }: {
@@ -508,7 +566,11 @@ function Card({
   projectSlug: string;
   milestoneName: string | null;
   onDragStart: () => void;
+  onDragCancel: () => void;
   onDropBefore: () => void;
+  onHoverBefore: () => void;
+  isDropTarget: boolean;
+  isDragging: boolean;
   onChanged: () => void;
   onOpen?: () => void;
 }) {
@@ -526,6 +588,9 @@ function Card({
     <div
       id={`card-${id}`}
       draggable
+      data-drop-target={isDropTarget || undefined}
+      data-dragging={isDragging || undefined}
+      style={{ willChange: "transform" }}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         draggedRef.current = true;
@@ -535,8 +600,12 @@ function Card({
         setTimeout(() => {
           draggedRef.current = false;
         }, 0);
+        onDragCancel();
       }}
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onHoverBefore();
+      }}
       onDrop={handleDrop}
       onClick={(e) => {
         if (draggedRef.current) return;
@@ -544,7 +613,7 @@ function Card({
         if (target.closest("button")) return;
         onOpen?.();
       }}
-      className="group relative cursor-pointer overflow-hidden rounded-md border border-border-1 bg-surface-1 text-sm leading-[1.4] hover:border-border-2 hover:bg-white/[0.03] active:scale-[0.99] transition-all duration-100 active:cursor-grabbing"
+      className="group relative cursor-pointer overflow-hidden rounded-md border border-border-1 bg-surface-1 text-sm leading-[1.4] hover:border-border-2 hover:bg-white/[0.03] transition-colors duration-75 active:cursor-grabbing data-[dragging]:opacity-40 data-[drop-target]:before:pointer-events-none data-[drop-target]:before:absolute data-[drop-target]:before:inset-x-0 data-[drop-target]:before:-top-[5px] data-[drop-target]:before:h-[2px] data-[drop-target]:before:rounded-full data-[drop-target]:before:bg-accent-warm data-[drop-target]:before:content-['']"
     >
       {task.coverUrl ? (
         <div className="h-[112px] w-full overflow-hidden bg-surface-hover">
