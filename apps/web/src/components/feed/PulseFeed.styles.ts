@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 
 export const styles = {
   page: {
-    minHeight: "100vh",
+    minHeight: "var(--vh)",
     background: "var(--surface-0)",
     color: "var(--text-1)",
     fontFamily: "var(--font-sans)",

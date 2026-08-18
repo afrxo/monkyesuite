@@ -45,7 +45,7 @@ export function useImageLightbox() {
       <img
         src={src}
         alt=""
-        className="max-h-[92vh] max-w-[92vw] object-contain shadow-2xl"
+        className="max-h-[calc(var(--vh)*0.92)] max-w-[calc(var(--vw)*0.92)] object-contain shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         draggable={false}
       />

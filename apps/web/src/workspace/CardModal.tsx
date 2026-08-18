@@ -248,7 +248,7 @@ export function CardModal({
           }}
           className="flex w-full max-w-[720px] flex-col gap-0 overflow-hidden rounded-lg border border-border-2 bg-surface-0 p-0 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] sm:max-w-[720px]"
           style={{
-            maxHeight: "88vh",
+            maxHeight: "calc(var(--vh) * 0.88)",
             animation: "cardModalPop 160ms cubic-bezier(0.2,0.9,0.3,1.2)",
           }}
         >

@@ -303,13 +303,31 @@ body {
   font-family: var(--font-sans);
   scrollbar-width: none;
 }
-/* App-wide zoom. Behaves like the browser's own Cmd+- : `zoom` on the root
-   element scales the initial containing block, so viewport units, fixed
-   overlays and modals all scale with the page rather than needing per-site
-   compensation. Change the one number to retune; 1 restores 100%. */
+/* App-wide zoom, the Cmd+- equivalent. Chrome implements `zoom` with legacy
+   semantics: it does NOT grow the initial containing block, so `100vh` keeps
+   resolving to the unzoomed viewport and then gets scaled down with everything
+   else — a full-height surface would render 10% short and leave dead space at
+   the bottom. --vw/--vh are the compensated units; use them instead of raw
+   100vw/100vh anywhere a surface must fill the screen.
+   Retuning means changing --app-zoom AND the divisor in --vw/--vh (CSS can't
+   divide by a custom property). 1 / divisor 1 restores 100%. */
+:root {
+  --app-zoom: 0.9;
+  --vw: calc(100vw / 0.9);
+  --vh: calc(100vh / 0.9);
+}
+
 html {
-  zoom: 0.9;
+  zoom: var(--app-zoom);
   scrollbar-width: none;
+}
+
+/* Full-screen fixed layers (dialog/sheet overlays, lightboxes, mobile sheets).
+   `inset: 0` sizes them against the unzoomed viewport, so they'd leave a strip
+   of the app uncovered along the bottom and right edges. */
+.fixed.inset-0 {
+  width: var(--vw);
+  height: var(--vh);
 }
 html::-webkit-scrollbar,
 body::-webkit-scrollbar { display: none; }
@@ -766,6 +784,8 @@ body::-webkit-scrollbar { display: none; }
 .search-overlay {
   position: fixed;
   inset: 0;
+  width: var(--vw);
+  height: var(--vh);
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
   z-index: 50;
@@ -777,11 +797,11 @@ body::-webkit-scrollbar { display: none; }
 }
 .search-content {
   position: fixed;
-  top: min(20vh, 160px);
+  top: min(calc(var(--vh) * 0.2), 160px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 51;
-  width: min(520px, calc(100vw - 32px));
+  width: min(520px, calc(var(--vw) - 32px));
   animation: search-content-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 @keyframes search-content-in {

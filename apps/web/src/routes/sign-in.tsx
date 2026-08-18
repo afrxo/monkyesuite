@@ -61,7 +61,7 @@ export function AuthShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-sm items-center">
+    <div className="mx-auto flex min-h-[calc(var(--vh)-8rem)] max-w-sm items-center">
       <div className="w-full rounded-2xl border border-border-1 bg-surface-1 px-8 py-9 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.6)]">
         {eyebrow ? (
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-5">

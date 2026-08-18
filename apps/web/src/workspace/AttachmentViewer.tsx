@@ -60,7 +60,7 @@ export function AttachmentViewer({
         <DialogOverlay className="z-[60] bg-black/80" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="fixed top-[50%] left-[50%] z-[60] flex max-h-[90vh] w-full max-w-[90vw] translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden rounded-lg border border-border-2 bg-surface-0 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+          className="fixed top-[50%] left-[50%] z-[60] flex max-h-[calc(var(--vh)*0.9)] w-full max-w-[calc(var(--vw)*0.9)] translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden rounded-lg border border-border-2 bg-surface-0 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
         >
           <DialogPrimitive.Title className="sr-only">
             {current.fileName}
@@ -226,7 +226,7 @@ function Renderer({ attachment }: { attachment: TaskAttachment }) {
   if (kind === "video") {
     return (
       // biome-ignore lint/a11y/useMediaCaption: user uploaded, no captions available
-      <video src={url} controls className="max-h-[80vh] max-w-full" />
+      <video src={url} controls className="max-h-[calc(var(--vh)*0.8)] max-w-full" />
     );
   }
   if (kind === "audio") {
@@ -242,7 +242,7 @@ function Renderer({ attachment }: { attachment: TaskAttachment }) {
       <iframe
         src={url}
         title={attachment.fileName}
-        className="h-[80vh] w-[80vw] bg-white"
+        className="h-[calc(var(--vh)*0.8)] w-[calc(var(--vw)*0.8)] bg-white"
       />
     );
   }
@@ -257,7 +257,7 @@ function Renderer({ attachment }: { attachment: TaskAttachment }) {
   }
   if (kind === "code") {
     return (
-      <pre className="max-h-[80vh] w-[80vw] overflow-auto bg-surface-0 p-4 font-mono text-[12px] leading-[1.55] text-text-2">
+      <pre className="max-h-[calc(var(--vh)*0.8)] w-[calc(var(--vw)*0.8)] overflow-auto bg-surface-0 p-4 font-mono text-[12px] leading-[1.55] text-text-2">
         <code>{textBody ?? ""}</code>
       </pre>
     );
@@ -302,7 +302,7 @@ function ZoomImage({ url, name }: { url: string; name: string }) {
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transition: drag ? "none" : "transform 120ms ease",
         }}
-        className="max-h-[80vh] max-w-[80vw] object-contain select-none"
+        className="max-h-[calc(var(--vh)*0.8)] max-w-[calc(var(--vw)*0.8)] object-contain select-none"
       />
     </div>
   );
@@ -319,7 +319,7 @@ function MarkdownView({
 }) {
   const html = useMemo(() => marked.parse(body) as string, [body]);
   return (
-    <div className="flex h-[80vh] w-[80vw] flex-col">
+    <div className="flex h-[calc(var(--vh)*0.8)] w-[calc(var(--vw)*0.8)] flex-col">
       <div className="flex items-center justify-end border-b border-border-1 px-3 py-1.5">
         <button
           type="button"

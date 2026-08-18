@@ -12,7 +12,7 @@ const styles = {
     background: "var(--surface-0)",
     color: "var(--text-2)",
     fontFamily: "var(--font-sans)",
-    minHeight: "100vh",
+    minHeight: "var(--vh)",
     boxSizing: "border-box",
   } satisfies CSSProperties,
   topbar: {

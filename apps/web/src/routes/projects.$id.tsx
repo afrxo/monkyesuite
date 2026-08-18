@@ -139,7 +139,7 @@ function WorkspacePage() {
         className="grid overflow-hidden bg-surface-0 text-text-2"
         style={{
           // Fill viewport below the 56px sticky AppHeader.
-          height: "calc(100vh - 56px)",
+          height: "calc(var(--vh) - 56px)",
           gridTemplateColumns: "260px 1fr 360px",
         }}
       >
@@ -304,7 +304,7 @@ function WorkspaceSkeleton() {
       <div
         className="grid overflow-hidden bg-surface-0"
         style={{
-          height: "calc(100vh - 56px)",
+          height: "calc(var(--vh) - 56px)",
           gridTemplateColumns: "260px 1fr 360px",
         }}
       >
