@@ -11,6 +11,8 @@ import {
   projectTags,
   taskAssignees,
   taskAttachments,
+  taskChecklistItems,
+  taskComments,
   tasks,
   taskTags,
   users,
@@ -29,6 +31,7 @@ import {
   reorderTaskSchema,
   TASK_STATUSES,
   type Task,
+  type TaskCounts,
   type TaskStatus,
   uuidSchema,
 } from "@monkyesuite/shared";
@@ -171,11 +174,61 @@ export async function tagsByTask(
   return out;
 }
 
+// Batch-load signal counts (comments, attachments, checklist done/total) for a
+// set of tasks. Three grouped counts in parallel — the same batched shape as
+// tagsByTask/assigneesByTask, so the board query gains no per-row round-trips.
+// Linked-note counts are intentionally excluded (per-task regex backlink scan).
+export async function countsByTask(
+  tx: Tx,
+  taskIds: string[],
+): Promise<Map<string, TaskCounts>> {
+  const out = new Map<string, TaskCounts>();
+  if (taskIds.length === 0) return out;
+  const at = (id: string): TaskCounts => {
+    let c = out.get(id);
+    if (!c) {
+      c = { comments: 0, attachments: 0, checklistDone: 0, checklistTotal: 0 };
+      out.set(id, c);
+    }
+    return c;
+  };
+  const [commentRows, attachmentRows, checklistRows] = await Promise.all([
+    tx
+      .select({ taskId: taskComments.taskId, n: sql<number>`count(*)::int` })
+      .from(taskComments)
+      .where(inArray(taskComments.taskId, taskIds))
+      .groupBy(taskComments.taskId),
+    tx
+      .select({ taskId: taskAttachments.taskId, n: sql<number>`count(*)::int` })
+      .from(taskAttachments)
+      .where(inArray(taskAttachments.taskId, taskIds))
+      .groupBy(taskAttachments.taskId),
+    tx
+      .select({
+        taskId: taskChecklistItems.taskId,
+        total: sql<number>`count(*)::int`,
+        done: sql<number>`count(*) filter (where ${taskChecklistItems.done})::int`,
+      })
+      .from(taskChecklistItems)
+      .where(inArray(taskChecklistItems.taskId, taskIds))
+      .groupBy(taskChecklistItems.taskId),
+  ]);
+  for (const r of commentRows) at(r.taskId).comments = r.n;
+  for (const r of attachmentRows) at(r.taskId).attachments = r.n;
+  for (const r of checklistRows) {
+    const c = at(r.taskId);
+    c.checklistTotal = r.total;
+    c.checklistDone = r.done;
+  }
+  return out;
+}
+
 function mapTask(
   row: TaskJoin,
   subtasks: Task[],
   tags: ProjectTag[] = [],
   assignees: AssigneeRef[] = [],
+  counts?: TaskCounts,
 ): Task {
   const t = row.task;
   return {
@@ -208,6 +261,7 @@ function mapTask(
         : null,
     tags,
     subtasks,
+    counts,
   };
 }
 
@@ -315,9 +369,10 @@ export function boardRoutes(): Hono<AppEnv> {
         .orderBy(asc(tasks.orderKey));
 
       const ids = rows.map((r) => r.task.id);
-      const [tagMap, assigneeMap] = await Promise.all([
+      const [tagMap, assigneeMap, countMap] = await Promise.all([
         tagsByTask(tx, ids),
         assigneesByTask(tx, ids),
+        countsByTask(tx, ids),
       ]);
 
       const childrenByParent = new Map<string, Task[]>();
@@ -330,6 +385,7 @@ export function boardRoutes(): Hono<AppEnv> {
             [],
             tagMap.get(row.task.id) ?? [],
             assigneeMap.get(row.task.id) ?? [],
+            countMap.get(row.task.id),
           ),
         );
         childrenByParent.set(row.task.parentTaskId, list);
@@ -347,6 +403,7 @@ export function boardRoutes(): Hono<AppEnv> {
           childrenByParent.get(row.task.id) ?? [],
           tagMap.get(row.task.id) ?? [],
           assigneeMap.get(row.task.id) ?? [],
+          countMap.get(row.task.id),
         );
         laneOf.get(task.status)?.tasks.push(task);
       }

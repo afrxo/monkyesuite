@@ -315,6 +315,19 @@ export interface Task {
   tags: ProjectTag[];
   // One level of subtasks only (specs/05 §5.1). Present on top-level cards.
   subtasks: Task[];
+  // Signal counts for dense surfaces (List view). Batched onto the board fetch
+  // only — other Task producers (card detail returns the full lists) leave it
+  // undefined. Subtask done/total is derived from `subtasks`, not carried here.
+  // Linked-note count is deliberately omitted: it's a per-task regex backlink
+  // scan (cards.ts) that would slow the board query if batched.
+  counts?: TaskCounts;
+}
+
+export interface TaskCounts {
+  comments: number;
+  attachments: number;
+  checklistDone: number;
+  checklistTotal: number;
 }
 
 // One board column: its status plus the ordered cards in it.
