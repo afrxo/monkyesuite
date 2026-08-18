@@ -13,16 +13,32 @@ import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
 import { MiniAvatar } from "./BoardView";
-import { extractTaskRefs } from "./short-id";
+import { extractTaskRefs, shortTaskId } from "./short-id";
 
-type Props = { projectId: string; onOpenCard?: (ref: string) => void };
+type Props = {
+  projectId: string;
+  projectSlug: string;
+  onOpenCard?: (ref: string) => void;
+};
 
-export function NotesRail({ projectId, onOpenCard }: Props) {
+export function NotesRail({ projectId, projectSlug, onOpenCard }: Props) {
   const [tab, setTab] = useState<"notes" | "activity">("notes");
   const notes = useQuery({
     queryKey: ["project-notes", projectId],
     queryFn: () => api.projectNotes(projectId),
   });
+  const board = useQuery({
+    queryKey: ["board", projectId],
+    queryFn: () => api.board(projectId),
+  });
+  const refTitles = new Map<string, string>();
+  if (board.data) {
+    for (const lane of board.data.lanes) {
+      for (const t of lane.tasks) {
+        refTitles.set(shortTaskId(projectSlug, t.id), t.title);
+      }
+    }
+  }
 
   return (
     <aside className="col-start-3 flex flex-col overflow-hidden border-l border-border-1">
@@ -44,6 +60,7 @@ export function NotesRail({ projectId, onOpenCard }: Props) {
             notes={notes.data ?? []}
             isLoading={notes.isPending}
             onOpenCard={onOpenCard}
+            refTitles={refTitles}
           />
         ) : (
           <ActivityStub />
@@ -82,11 +99,13 @@ function NotesTab({
   notes,
   isLoading,
   onOpenCard,
+  refTitles,
 }: {
   projectId: string;
   notes: ProjectNote[];
   isLoading: boolean;
   onOpenCard?: (ref: string) => void;
+  refTitles: Map<string, string>;
 }) {
   const qc = useQueryClient();
   const invalidate = () =>
@@ -122,6 +141,7 @@ function NotesTab({
               note={n}
               onDelete={() => del.mutate(n.id)}
               onOpenCard={onOpenCard}
+              refTitles={refTitles}
             />
           ))}
         </ul>
@@ -214,19 +234,31 @@ function NoteItem({
   note,
   onDelete,
   onOpenCard,
+  refTitles,
 }: {
   note: ProjectNote;
   onDelete: () => void;
   onOpenCard?: (ref: string) => void;
+  refTitles: Map<string, string>;
 }) {
   const refs = extractTaskRefs(note.body ?? "");
   return (
     <li className="border-b border-border-1 py-3 last:border-b-0">
-      <div className="mb-1.5 flex items-baseline gap-2">
-        {note.title ? (
-          <span className="text-sm font-medium text-text-1">{note.title}</span>
-        ) : null}
-        <span className="ml-auto font-mono text-xs text-text-disabled">
+      <div className="mb-1.5 flex items-center gap-2">
+        {note.author ? (
+          <div
+            className="flex min-w-0 items-center gap-1.5 text-[11px] text-text-disabled"
+            title={note.author.email}
+          >
+            <MiniAvatar name={note.author.name ?? note.author.email} />
+            <span className="truncate">
+              {note.author.name ?? note.author.email.split("@")[0]}
+            </span>
+          </div>
+        ) : (
+          <div className="h-5 w-5" aria-hidden />
+        )}
+        <span className="ml-auto font-mono text-[11px] text-text-disabled">
           {relTime(note.createdAt)}
         </span>
         <button
@@ -238,14 +270,10 @@ function NoteItem({
           <Icon name="x" size={11} />
         </button>
       </div>
-      {note.author ? (
-        <div
-          className="mb-1 flex items-center gap-1.5 text-[11px] text-text-disabled"
-          title={note.author.email}
-        >
-          <MiniAvatar name={note.author.name ?? note.author.email} />
-          <span>{note.author.name ?? note.author.email.split("@")[0]}</span>
-        </div>
+      {note.title ? (
+        <p className="mb-1 text-sm font-medium leading-[1.35] text-text-1">
+          {note.title}
+        </p>
       ) : null}
       {note.body ? (
         <p className="whitespace-pre-wrap text-sm leading-[1.5] text-text-3">
@@ -253,39 +281,43 @@ function NoteItem({
         </p>
       ) : null}
       {refs.length > 0 ? (
-        <div className="mt-1 flex flex-wrap gap-2">
-          {refs.map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => {
-                onOpenCard?.(r);
-                // Delay so a doc→board switch has time to mount the anchor.
-                requestAnimationFrame(() => {
-                  const tick = (n: number) => {
-                    const el = document.getElementById(`card-${r}`);
-                    if (el) {
-                      el.scrollIntoView({
-                        behavior: "smooth",
-                        block: "center",
-                      });
-                      el.classList.add("ring-1", "ring-accent-warm");
-                      setTimeout(
-                        () => el.classList.remove("ring-1", "ring-accent-warm"),
-                        1200,
-                      );
-                    } else if (n > 0) {
-                      setTimeout(() => tick(n - 1), 60);
-                    }
-                  };
-                  tick(10);
-                });
-              }}
-              className="ws-note-link"
-            >
-              → {r}
-            </button>
-          ))}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {refs.map((r) => {
+            const title = refTitles.get(r);
+            return (
+              <button
+                key={r}
+                type="button"
+                title={title ? `${r} · ${title}` : r}
+                onClick={() => {
+                  onOpenCard?.(r);
+                  requestAnimationFrame(() => {
+                    const tick = (n: number) => {
+                      const el = document.getElementById(`card-${r}`);
+                      if (el) {
+                        el.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        });
+                        el.classList.add("ring-1", "ring-accent-warm");
+                        setTimeout(
+                          () =>
+                            el.classList.remove("ring-1", "ring-accent-warm"),
+                          1200,
+                        );
+                      } else if (n > 0) {
+                        setTimeout(() => tick(n - 1), 60);
+                      }
+                    };
+                    tick(10);
+                  });
+                }}
+                className="ws-note-link"
+              >
+                → {title ?? r}
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </li>

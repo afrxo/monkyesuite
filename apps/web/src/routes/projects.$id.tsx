@@ -180,7 +180,11 @@ function WorkspacePage() {
 
       {/* Right rail — desktop */}
       <div className="hidden md:contents">
-        <NotesRail projectId={id} onOpenCard={() => setDoc(null)} />
+        <NotesRail
+          projectId={id}
+          projectSlug={project.data.slug}
+          onOpenCard={() => setDoc(null)}
+        />
       </div>
 
       </div>
@@ -220,7 +224,11 @@ function WorkspacePage() {
               }}
             />
           ) : (
-            <NotesRail projectId={id} onOpenCard={() => setDoc(null)} />
+            <NotesRail
+          projectId={id}
+          projectSlug={project.data.slug}
+          onOpenCard={() => setDoc(null)}
+        />
           )}
         </MobileSheet>
       ) : null}

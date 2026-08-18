@@ -552,6 +552,17 @@ function Card({
         </div>
       ) : null}
       <div className="p-3">
+      {milestoneName && task.milestoneId ? (
+        <div
+          className="mb-1.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-text-disabled"
+          title={`Milestone: ${milestoneName}`}
+        >
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${milestoneColor(task.milestoneId).dot}`}
+          />
+          <span className="truncate">{milestoneName}</span>
+        </div>
+      ) : null}
       <div className="mb-2 pr-5 text-text-1">{task.title}</div>
       <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-text-disabled">
         {(task.tags ?? []).map((tag) => (
@@ -562,14 +573,6 @@ function Card({
             {tag.name}
           </span>
         ))}
-        {milestoneName && task.milestoneId ? (
-          <span
-            title={`Milestone: ${milestoneName}`}
-            className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${milestoneColor(task.milestoneId).chip}`}
-          >
-            {milestoneName}
-          </span>
-        ) : null}
         {(task.assignees ?? []).length > 0 ? (
           <span className="ml-auto flex -space-x-1">
             {(task.assignees ?? []).slice(0, 3).map((a) => (
