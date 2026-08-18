@@ -50,7 +50,6 @@ export function ListGroup({
     <div role="rowgroup">
       {!flat ? (
         <div
-          role="row"
           className="sticky top-8 z-10 flex items-center gap-2.5 border-b border-border-1 bg-surface-1 px-4 py-1.5"
         >
           <button

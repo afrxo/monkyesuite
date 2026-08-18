@@ -163,8 +163,10 @@ export function ListRow({
   const extraAssignees = assignees.length - shownAssignees.length;
 
   return (
+    // Plain clickable div matches the board Card pattern; roving tabindex +
+    // container-level key handling give real keyboard nav without ARIA-grid
+    // roles (which the toolchain's a11y rules reject on non-table elements).
     <div
-      role="row"
       ref={registerRow}
       tabIndex={focused ? 0 : -1}
       onClick={onOpen}
@@ -176,7 +178,7 @@ export function ListRow({
           onOpen();
         }
       }}
-      aria-label={`${shortTaskId(projectSlug, task.id)} ${task.title}`}
+      title={`${shortTaskId(projectSlug, task.id)} — ${task.title}`}
       className={`grid min-h-[38px] cursor-pointer items-center gap-3 border-b border-border-1 px-4 text-sm outline-none transition-colors ${
         focused
           ? "bg-white/[0.04] ring-1 ring-inset ring-accent-warm/60"

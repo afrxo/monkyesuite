@@ -108,7 +108,7 @@ export function useListRows({
   groupBy,
   sort,
 }: UseListRowsArgs): UseListRowsResult {
-  const { tagFilter, query, milestoneFilter } = filter;
+  // `filter` is memoized by the caller, so it's a stable dependency.
   return useMemo(() => {
     // Flatten: board.lanes carry only top-level tasks (subtasks are nested on
     // each parent's `.subtasks`). Filter parents by the shared predicate +
@@ -181,16 +181,5 @@ export function useListRows({
     groups.push(build("none", null, "No milestone"));
 
     return { groups, totalShown: parents.length };
-    // filter is reconstructed each render (Set identity); depend on its parts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    board,
-    projectSlug,
-    showArchived,
-    groupBy,
-    sort,
-    tagFilter,
-    query,
-    milestoneFilter,
-  ]);
+  }, [board, filter, projectSlug, showArchived, groupBy, sort]);
 }

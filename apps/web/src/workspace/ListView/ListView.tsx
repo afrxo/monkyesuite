@@ -219,18 +219,17 @@ export function ListView({
       </div>
 
       {/* Scroll area = the grid */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: roving-tabindex
+          list; keyboard nav is handled here and focus moves to child rows. */}
       <div
         ref={gridRef}
-        role="grid"
         aria-label="Tasks"
-        aria-rowcount={flatRows.length}
         tabIndex={0}
         onKeyDown={onKeyDown}
         className="min-h-0 flex-1 overflow-y-auto outline-none"
       >
         {/* Column header (sortable) */}
         <div
-          role="row"
           className="sticky top-0 z-20 grid h-8 items-center gap-3 border-b border-border-1 bg-surface-0 px-4"
           style={{ gridTemplateColumns: LIST_GRID_COLS }}
         >

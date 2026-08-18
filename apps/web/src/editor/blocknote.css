@@ -21,15 +21,20 @@
   font-weight: 700;
   letter-spacing: -0.01em;
 }
-.bn-editor .bn-block-content h1 { font-size: 24px; margin-block: 24px 8px; }
-.bn-editor .bn-block-content h2 { font-size: 19px; margin-block: 20px 6px; }
-.bn-editor .bn-block-content h3 { font-size: 16px; margin-block: 16px 4px; }
+.bn-editor .bn-block-content h1 { font-size: 24px; margin-block: 14px 6px; }
+.bn-editor .bn-block-content h2 { font-size: 19px; margin-block: 12px 4px; }
+.bn-editor .bn-block-content h3 { font-size: 16px; margin-block: 10px 3px; }
 /* Kill top margin on the very first block so an opening heading doesn't sit
-   half a line lower than expected. */
+   half a line lower than expected. Cover both the direct-child selector and
+   any BN wrapper class that sits between the group and the block. */
 .bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h1,
 .bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h2,
 .bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h3,
-.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content p {
+.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content p,
+.bn-editor .bn-block-group:first-child > .bn-block:first-child h1,
+.bn-editor .bn-block-group:first-child > .bn-block:first-child h2,
+.bn-editor .bn-block-group:first-child > .bn-block:first-child h3,
+.bn-editor > .bn-block-group > .bn-block:first-child *:first-child {
   margin-top: 0 !important;
 }
 
@@ -40,12 +45,12 @@
 .bn-editor .bn-block-content {
   border-radius: 4px;
   transition: outline-color 120ms ease;
-  outline: 1px dashed transparent;
-  outline-offset: 2px;
+  outline: 1.5px dashed rgba(255, 255, 255, 0.16);
+  outline-offset: 3px;
 }
 .bn-editor .bn-block:hover > .bn-block-content,
 .bn-editor .bn-block-content:focus-within {
-  outline-color: rgba(255, 255, 255, 0.08);
+  outline-color: rgba(255, 255, 255, 0.32);
 }
 
 /*
