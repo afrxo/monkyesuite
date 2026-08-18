@@ -42,14 +42,17 @@
  * Notion-style faint dotted outline on the block under the cursor + on hover.
  * Signals editability without competing with the text.
  */
-.bn-editor .bn-block-content {
+/* Only outline LEAF blocks — a block whose content doesn't wrap another
+   .bn-block-content. Otherwise BN's nested list/callout structure paints
+   an outline on every ancestor and the rectangles stack. */
+.bn-editor .bn-block-content:not(:has(.bn-block-content)) {
   border-radius: 4px;
   transition: outline-color 120ms ease;
   outline: 1.5px dashed rgba(255, 255, 255, 0.16);
   outline-offset: 3px;
 }
-.bn-editor .bn-block:hover > .bn-block-content,
-.bn-editor .bn-block-content:focus-within {
+.bn-editor .bn-block:hover > .bn-block-content:not(:has(.bn-block-content)),
+.bn-editor .bn-block-content:not(:has(.bn-block-content)):focus-within {
   outline-color: rgba(255, 255, 255, 0.32);
 }
 
