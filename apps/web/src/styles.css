@@ -331,6 +331,53 @@ body::-webkit-scrollbar { display: none; }
   border: 2px solid transparent;
 }
 
+/* Card modal description — mirror doc editor body typography so a card's
+   description reads the same as a doc block. */
+.card-desc {
+  font-family: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-2);
+}
+.card-desc h1,
+.card-desc h2,
+.card-desc h3 {
+  color: var(--text-1);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.card-desc h1 { font-size: 22px; margin-block: 20px 6px; }
+.card-desc h2 { font-size: 18px; margin-block: 16px 4px; }
+.card-desc h3 { font-size: 15px; margin-block: 12px 4px; }
+.card-desc p { margin-block: 8px; color: var(--text-2); }
+.card-desc ul,
+.card-desc ol { padding-left: 20px; margin-block: 8px; }
+.card-desc li { margin-block: 2px; color: var(--text-2); }
+.card-desc a {
+  color: var(--accent-warm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.card-desc code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.92em;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.card-desc pre {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+.card-desc pre code { background: transparent; padding: 0; }
+.card-desc blockquote {
+  border-left: 3px solid var(--accent-warm);
+  padding-left: 12px;
+  color: var(--text-3);
+  margin-block: 8px;
+}
+.card-desc:empty::before { content: none; }
+
 .gd-mobile { display: none; }
 .gd-desktop { display: block; }
 @media (max-width: 768px) {

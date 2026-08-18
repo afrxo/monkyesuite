@@ -1,28 +1,27 @@
-// Card detail modal (specs/05 card modal). Overlay + two-column layout.
-// Opens when `?card=<shortId>` is in the workspace route search params.
-// Every field is inline-editable, autosaves on blur/toggle, and updates the
-// bundled ["card-detail", taskId] query on success.
-//
-// Renders the AttachmentViewer as a modal-over-modal when the user clicks a
-// grid tile; keyboard nav (arrows, esc) is scoped to whichever level is
-// topmost.
+// Card detail modal (specs/05 card modal). Single-column body with a compact
+// metadata strip, interleaved comments+activity feed, and modal-scoped
+// keyboard shortcuts. Every field is inline-editable and autosaves; opens on
+// `?card=<shortId>`.
 
 import type {
   LinkedNote,
   Milestone,
   ProjectTag,
   Task,
+  TaskActivityEvent,
   TaskAttachment,
   TaskChecklistItem,
   TaskComment,
   TaskDetail,
   TaskStatus,
 } from "@monkyesuite/shared";
+import { TASK_STATUSES } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { marked } from "marked";
 import {
   type ChangeEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -62,6 +61,11 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   archived: "Archived",
 };
 
+// Statuses the picker offers — archived lives behind its own action.
+const STATUS_CHOICES: TaskStatus[] = TASK_STATUSES.filter(
+  (s) => s !== "archived",
+);
+
 type Props = {
   taskId: string;
   projectSlug: string;
@@ -75,15 +79,109 @@ export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
     queryKey: ["card-detail", taskId],
     queryFn: () => api.cardDetail(taskId),
   });
-  const invalidate = () =>
+  const invalidate = useCallback(() => {
     qc.invalidateQueries({ queryKey: ["card-detail", taskId] });
+  }, [qc, taskId]);
+  const invalidateBoard = useCallback(
+    (projectId: string) => {
+      qc.invalidateQueries({ queryKey: ["board", projectId] });
+    },
+    [qc],
+  );
 
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [archiveConfirming, setArchiveConfirming] = useState(false);
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const archiveResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const shortId = useMemo(
     () => shortTaskId(projectSlug, taskId),
     [projectSlug, taskId],
   );
+
+  const task = detail.data?.task ?? null;
+  const projectId = task?.projectId ?? null;
+
+  const archive = useMutation({
+    mutationFn: () => api.moveTask(taskId, { status: "archived" }),
+    onSuccess: () => {
+      if (projectId) invalidateBoard(projectId);
+      invalidate();
+      onClose();
+    },
+    onError: (err) => toastError(err, "Failed to archive card."),
+  });
+
+  const del = useMutation({
+    mutationFn: () => api.deleteTask(taskId),
+    onSuccess: () => {
+      if (projectId) invalidateBoard(projectId);
+      qc.removeQueries({ queryKey: ["card-detail", taskId] });
+      onClose();
+    },
+    onError: (err) => toastError(err, "Failed to delete card."),
+  });
+
+  const armArchive = useCallback(() => {
+    if (archiveConfirming) {
+      if (archiveResetTimer.current) clearTimeout(archiveResetTimer.current);
+      archiveResetTimer.current = null;
+      archive.mutate();
+      return;
+    }
+    setArchiveConfirming(true);
+    if (archiveResetTimer.current) clearTimeout(archiveResetTimer.current);
+    archiveResetTimer.current = setTimeout(
+      () => setArchiveConfirming(false),
+      3000,
+    );
+  }, [archive, archiveConfirming]);
+
+  useEffect(
+    () => () => {
+      if (archiveResetTimer.current) clearTimeout(archiveResetTimer.current);
+    },
+    [],
+  );
+
+  const focusComposer = useCallback(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.focus();
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, []);
+
+  // Modal-scoped shortcuts. Typing inputs suppress everything except esc/⌘↵.
+  useEffect(() => {
+    if (viewerIndex !== null) return;
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      const meta = e.metaKey || e.ctrlKey;
+      if (e.key === "Escape") return; // Dialog handles it.
+      if (meta && e.key === "Enter") return; // per-field handlers own submit.
+      if (typing) return;
+      if (deleteConfirming) return;
+      if (e.key === "s" || e.key === "S") {
+        e.preventDefault();
+        setStatusOpen(true);
+      } else if (e.key === "x" || e.key === "X") {
+        e.preventDefault();
+        armArchive();
+      } else if (e.key === "c" || e.key === "C") {
+        e.preventDefault();
+        focusComposer();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [viewerIndex, deleteConfirming, armArchive, focusComposer]);
 
   return (
     <>
@@ -101,43 +199,70 @@ export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
           onPointerDownOutside={(e) => {
             if (viewerIndex !== null) e.preventDefault();
           }}
-          className="grid w-full max-w-[920px] overflow-hidden rounded-lg border border-border-2 bg-surface-0 p-0 gap-0 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] sm:max-w-[920px]"
+          className="flex w-full max-w-[720px] flex-col gap-0 overflow-hidden rounded-lg border border-border-2 bg-surface-0 p-0 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] sm:max-w-[720px]"
           style={{
             maxHeight: "88vh",
-            gridTemplateColumns: "1fr 280px",
-            gridTemplateRows: "auto 1fr",
             animation: "cardModalPop 160ms cubic-bezier(0.2,0.9,0.3,1.2)",
           }}
         >
           <DialogTitle className="sr-only">Card details</DialogTitle>
           <Header
             shortId={shortId}
-            task={detail.data?.task ?? null}
+            task={task}
             onClose={onClose}
-            taskId={taskId}
+            statusOpen={statusOpen}
+            onStatusOpenChange={setStatusOpen}
+            onStatusChange={(s) => {
+              if (!task || s === task.status) return;
+              api
+                .moveTask(taskId, { status: s })
+                .then(() => {
+                  invalidate();
+                  if (projectId) invalidateBoard(projectId);
+                })
+                .catch((err) => toastError(err, "Failed to change status."));
+            }}
+            archiveConfirming={archiveConfirming}
+            onArchive={armArchive}
+            archivePending={archive.isPending}
+            onDelete={() => setDeleteConfirming(true)}
           />
-          <div className="min-w-0 overflow-y-auto border-r border-border-1 px-7 py-6">
-            {detail.data ? (
-              <MainColumn
-                taskId={taskId}
-                detail={detail.data}
-                onOpenViewer={setViewerIndex}
-                invalidate={invalidate}
-              />
+
+          <div className="ws-scroll flex-1 overflow-y-auto">
+            {detail.data && task ? (
+              <>
+                <MetaStrip
+                  detail={detail.data}
+                  milestones={milestones}
+                  invalidate={invalidate}
+                />
+                <div className="mx-auto max-w-[672px] px-8 pb-10 pt-3">
+                  <TitleField task={task} onSaved={invalidate} />
+                  <DescriptionField task={task} onSaved={invalidate} />
+                  <ChecklistSection
+                    taskId={taskId}
+                    items={detail.data.checklistItems}
+                    onChanged={invalidate}
+                  />
+                  <AttachmentsSection
+                    taskId={taskId}
+                    attachments={detail.data.attachments}
+                    onOpenViewer={setViewerIndex}
+                    onChanged={invalidate}
+                  />
+                  <ActivityFeed
+                    taskId={taskId}
+                    comments={detail.data.comments}
+                    activity={detail.data.activity}
+                    onChanged={invalidate}
+                    composerRef={composerRef}
+                  />
+                </div>
+              </>
             ) : (
-              <p className="text-xs text-text-disabled">Loading…</p>
+              <p className="px-8 py-6 text-xs text-text-disabled">Loading…</p>
             )}
           </div>
-          <aside className="flex flex-col gap-5 overflow-y-auto px-4 py-5">
-            {detail.data ? (
-              <SideColumn
-                taskId={taskId}
-                detail={detail.data}
-                milestones={milestones}
-                invalidate={invalidate}
-              />
-            ) : null}
-          </aside>
         </DialogContent>
       </Dialog>
 
@@ -149,6 +274,39 @@ export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
           onClose={() => setViewerIndex(null)}
         />
       ) : null}
+
+      <Dialog
+        open={deleteConfirming}
+        onOpenChange={(o) => {
+          if (!o) setDeleteConfirming(false);
+        }}
+      >
+        <DialogContent className="max-w-sm sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete card?</DialogTitle>
+          </DialogHeader>
+          <p className="text-[12px] text-text-3">
+            This deletes the card and everything on it. Cannot be undone.
+          </p>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setDeleteConfirming(false)}
+              className="rounded-[3px] px-2.5 py-[3px] text-[11px] font-medium text-text-3 hover:bg-surface-hover"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => del.mutate()}
+              disabled={del.isPending}
+              className="rounded-[3px] bg-destructive px-2.5 py-[3px] text-[11px] font-medium text-white disabled:opacity-60"
+            >
+              {del.isPending ? "Deleting…" : "Delete"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -159,12 +317,24 @@ function Header({
   shortId,
   task,
   onClose,
-  taskId,
+  statusOpen,
+  onStatusOpenChange,
+  onStatusChange,
+  archiveConfirming,
+  onArchive,
+  archivePending,
+  onDelete,
 }: {
   shortId: string;
   task: Task | null;
   onClose: () => void;
-  taskId: string;
+  statusOpen: boolean;
+  onStatusOpenChange: (o: boolean) => void;
+  onStatusChange: (s: TaskStatus) => void;
+  archiveConfirming: boolean;
+  onArchive: () => void;
+  archivePending: boolean;
+  onDelete: () => void;
 }) {
   const copyCardLink = () => {
     const url = new URL(window.location.href);
@@ -173,97 +343,444 @@ function Header({
   };
   const status = task?.status ?? "todo";
   return (
-    <div className="col-span-2 flex items-center gap-2.5 border-b border-border-1 px-3.5 py-2.5">
-      <button
-        type="button"
-        onClick={copyCardLink}
-        title="Copy link to card"
-        className="rounded-[3px] px-1.5 py-0.5 font-mono text-[11px] text-text-disabled hover:bg-surface-hover hover:text-text-3"
-      >
-        {shortId}
-      </button>
-      <span className="text-[11px] text-text-disabled">·</span>
-      <span
-        className="inline-flex cursor-pointer items-center gap-1.5 rounded-[3px] bg-surface-hover px-2 py-[3px] font-mono text-[11px] text-text-1 hover:bg-white/[0.08]"
-        title="Status (view only in this pass)"
-      >
-        <span
-          className="inline-block h-1.5 w-1.5 rounded-full"
-          style={{ background: "var(--accent-warm)" }}
-        />
-        {STATUS_LABEL[status]}
-        <Icon name="chevron-down" size={9} className="text-text-disabled" />
-      </span>
-      <div className="flex-1" />
-      <button
-        type="button"
-        onClick={copyCardLink}
-        title="Copy link"
-        aria-label={`Copy link to ${shortId}`}
-        className="grid h-6 w-6 place-items-center rounded-[3px] text-text-disabled hover:bg-surface-hover hover:text-text-1"
-      >
-        <Icon name="link" size={13} />
-      </button>
-      <button
-        type="button"
-        title="More"
-        aria-label={`More actions for ${taskId}`}
-        className="grid h-6 w-6 place-items-center rounded-[3px] text-text-disabled hover:bg-surface-hover hover:text-text-1"
-      >
-        <Icon name="more" size={14} />
-      </button>
-      <button
-        type="button"
-        onClick={onClose}
-        title="Close"
-        aria-label="Close card"
-        className="flex items-center gap-1 rounded-[3px] px-1.5 py-1 text-text-disabled hover:bg-surface-hover hover:text-text-1"
-      >
-        <Icon name="x" size={12} />
-        <span className="rounded-[3px] border border-border-1 px-1 py-px font-mono text-[10px] text-text-disabled">
-          Esc
+    <div className="sticky top-0 z-10 border-b border-border-1 bg-surface-0/95 px-4 py-2 backdrop-blur">
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={copyCardLink}
+          title="Copy link to card"
+          className="rounded-[3px] px-1.5 py-0.5 font-mono text-[11px] text-text-disabled hover:bg-surface-hover hover:text-text-3"
+        >
+          {shortId}
+        </button>
+        <span className="text-[11px] text-text-disabled">·</span>
+        <Popover open={statusOpen} onOpenChange={onStatusOpenChange}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-[3px] bg-surface-hover px-2 py-[3px] font-mono text-[11px] text-text-1 hover:bg-white/[0.08]"
+              title="Change status (s)"
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: statusDot(status) }}
+              />
+              {STATUS_LABEL[status]}
+              <Icon
+                name="chevron-down"
+                size={9}
+                className="text-text-disabled"
+              />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            sideOffset={6}
+            className="w-44 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 py-1 text-text-1 shadow-xl"
+          >
+            {STATUS_CHOICES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  onStatusChange(s);
+                  onStatusOpenChange(false);
+                }}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
+                  status === s ? "text-text-1" : "text-text-3"
+                }`}
+              >
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  style={{ background: statusDot(s) }}
+                />
+                {STATUS_LABEL[s]}
+                {status === s ? (
+                  <span className="ml-auto">
+                    <Icon
+                      name="check"
+                      size={10}
+                      className="text-text-disabled"
+                    />
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+        <div className="flex-1" />
+        <span className="hidden font-mono text-[10px] text-text-disabled lg:inline">
+          s status · x archive · c comment
         </span>
-      </button>
+        <button
+          type="button"
+          onClick={onArchive}
+          disabled={archivePending}
+          title={archiveConfirming ? "Click again to confirm" : "Archive (x)"}
+          aria-label="Archive card"
+          className={`flex h-6 items-center gap-1 rounded-[3px] px-1.5 text-[11px] transition-colors ${
+            archiveConfirming
+              ? "bg-amber-500/15 text-amber-200"
+              : "text-text-disabled hover:bg-surface-hover hover:text-text-1"
+          }`}
+        >
+          <Icon name="archive" size={13} />
+          {archiveConfirming ? (
+            <span className="font-mono text-[10px]">confirm?</span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          title="Delete"
+          aria-label="Delete card"
+          className="grid h-6 w-6 place-items-center rounded-[3px] text-text-disabled transition-colors hover:bg-destructive/15 hover:text-rose-300"
+        >
+          <Icon name="trash" size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Close"
+          aria-label="Close card"
+          className="flex items-center gap-1 rounded-[3px] px-1.5 py-1 text-text-disabled hover:bg-surface-hover hover:text-text-1"
+        >
+          <Icon name="x" size={12} />
+          <span className="rounded-[3px] border border-border-1 px-1 py-px font-mono text-[10px] text-text-disabled">
+            Esc
+          </span>
+        </button>
+      </div>
     </div>
   );
 }
 
-/* -------------------------------- main col --------------------------------- */
+function statusDot(s: TaskStatus): string {
+  switch (s) {
+    case "done":
+      return "#4ade80";
+    case "review":
+      return "#a78bfa";
+    case "in_progress":
+      return "var(--accent-warm)";
+    case "todo":
+      return "#60a5fa";
+    case "archived":
+      return "var(--text-disabled)";
+    default:
+      return "var(--text-disabled)";
+  }
+}
 
-function MainColumn({
-  taskId,
+/* -------------------------------- meta strip ------------------------------- */
+
+function MetaStrip({
   detail,
-  onOpenViewer,
+  milestones,
   invalidate,
 }: {
-  taskId: string;
   detail: TaskDetail;
-  onOpenViewer: (i: number) => void;
+  milestones: Milestone[];
   invalidate: () => void;
 }) {
+  const t = detail.task;
+  const setMilestone = useMutation({
+    mutationFn: (id: string | null) =>
+      api.patchTask(t.id, { milestoneId: id }),
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
+  const setDue = useMutation({
+    mutationFn: (iso: string | null) => api.patchTask(t.id, { dueAt: iso }),
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
+  const setAssignees = useMutation({
+    mutationFn: (uids: string[]) =>
+      api.patchTask(t.id, { assigneeIds: uids }),
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
+
+  const linkedCount = detail.linkedNotes.length;
+
   return (
-    <>
-      <TitleField task={detail.task} onSaved={invalidate} />
-      <DescriptionField task={detail.task} onSaved={invalidate} />
-      <ChecklistSection
-        taskId={taskId}
-        items={detail.checklistItems}
-        onChanged={invalidate}
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border-1 bg-surface-0 px-8 py-2 text-[12px]">
+      <MilestonePicker
+        milestones={milestones}
+        value={t.milestoneId ?? null}
+        onChange={(id) => setMilestone.mutate(id)}
+        pending={setMilestone.isPending}
       />
-      <AttachmentsSection
-        taskId={taskId}
-        attachments={detail.attachments}
-        onOpenViewer={onOpenViewer}
-        onChanged={invalidate}
+      <span className="text-text-disabled">·</span>
+      <AssigneePicker
+        projectId={t.projectId}
+        value={(t.assignees ?? []).map((a) => a.id)}
+        current={t.assignees ?? []}
+        onChange={(uids) => setAssignees.mutate(uids)}
+        pending={setAssignees.isPending}
       />
-      <CommentsSection
-        taskId={taskId}
-        comments={detail.comments}
-        onChanged={invalidate}
-      />
-    </>
+      <span className="text-text-disabled">·</span>
+      <TagsPicker task={t} onChanged={invalidate} />
+      <span className="text-text-disabled">·</span>
+      <DueDate value={t.dueAt} onChange={(v) => setDue.mutate(v)} />
+      {linkedCount > 0 ? (
+        <>
+          <span className="text-text-disabled">·</span>
+          <LinkedNotesChip notes={detail.linkedNotes} />
+        </>
+      ) : null}
+    </div>
   );
 }
+
+function DueDate({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (iso: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? new Date(value) : null;
+  const label = selected
+    ? `${pad2(selected.getUTCDate())}.${pad2(selected.getUTCMonth() + 1)}.${selected.getUTCFullYear()}`
+    : "dd.mm.yyyy";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Due date"
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-text-3 hover:bg-surface-hover"
+        >
+          <Icon name="clock" size={11} className="text-text-disabled" />
+          <span
+            className={`font-mono text-[11px] ${selected ? "text-text-1" : "text-text-disabled"}`}
+          >
+            {label}
+          </span>
+          {selected ? (
+            <span className="font-mono text-[10px] text-text-disabled">
+              · {relTime(value ?? "")}
+            </span>
+          ) : null}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="w-[260px] overflow-hidden rounded-md border border-border-1 bg-surface-1 p-2 text-text-1 shadow-xl"
+      >
+        <Calendar
+          selected={selected}
+          onSelect={(d) => {
+            onChange(
+              new Date(
+                Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()),
+              ).toISOString(),
+            );
+            setOpen(false);
+          }}
+          onClear={() => {
+            onChange(null);
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+const MONTH_LABEL = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+const DOW = ["M", "T", "W", "T", "F", "S", "S"];
+
+function Calendar({
+  selected,
+  onSelect,
+  onClear,
+}: {
+  selected: Date | null;
+  onSelect: (d: Date) => void;
+  onClear: () => void;
+}) {
+  const today = new Date();
+  const initial = selected ?? today;
+  const [view, setView] = useState({
+    y: initial.getUTCFullYear(),
+    m: initial.getUTCMonth(),
+  });
+  const firstOfMonth = new Date(view.y, view.m, 1);
+  // Monday-first offset: JS getDay() has Sun=0; shift so Mon=0.
+  const startDow = (firstOfMonth.getDay() + 6) % 7;
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const cells: { d: Date; inMonth: boolean }[] = [];
+  for (let i = 0; i < startDow; i++) {
+    const d = new Date(view.y, view.m, -startDow + i + 1);
+    cells.push({ d, inMonth: false });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ d: new Date(view.y, view.m, d), inMonth: true });
+  }
+  while (cells.length % 7 !== 0 || cells.length < 42) {
+    const last = cells[cells.length - 1]!.d;
+    const next = new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1);
+    cells.push({ d: next, inMonth: next.getMonth() === view.m });
+    if (cells.length >= 42) break;
+  }
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  const nudge = (delta: number) => {
+    setView((v) => {
+      const m = v.m + delta;
+      const y = v.y + Math.floor(m / 12);
+      return { y, m: ((m % 12) + 12) % 12 };
+    });
+  };
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between px-1">
+        <span className="text-[12px] font-semibold text-text-1">
+          {MONTH_LABEL[view.m]} {view.y}
+        </span>
+        <div className="flex gap-0.5">
+          <button
+            type="button"
+            onClick={() => nudge(-1)}
+            aria-label="Previous month"
+            className="grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-surface-hover hover:text-text-1"
+          >
+            <Icon name="chevron-down" size={10} className="rotate-90" />
+          </button>
+          <button
+            type="button"
+            onClick={() => nudge(1)}
+            aria-label="Next month"
+            className="grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-surface-hover hover:text-text-1"
+          >
+            <Icon name="chevron-down" size={10} className="-rotate-90" />
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-px pb-1">
+        {DOW.map((d, i) => (
+          <div
+            key={`${d}-${i}`}
+            className="pb-1 text-center font-mono text-[9px] uppercase text-text-disabled"
+          >
+            {d}
+          </div>
+        ))}
+        {cells.map(({ d, inMonth }) => {
+          const isSel = selected ? sameDay(d, selected) : false;
+          const isToday = sameDay(d, today);
+          return (
+            <button
+              key={d.toISOString()}
+              type="button"
+              onClick={() => onSelect(d)}
+              className={`grid h-7 w-7 place-items-center rounded font-mono text-[11px] transition-colors ${
+                isSel
+                  ? "bg-accent-warm text-[#1a1000]"
+                  : inMonth
+                    ? isToday
+                      ? "bg-surface-hover text-text-1"
+                      : "text-text-2 hover:bg-surface-hover"
+                    : "text-text-disabled hover:bg-surface-hover"
+              }`}
+            >
+              {d.getDate()}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1 flex items-center justify-between border-t border-border-1 pt-1.5">
+        <button
+          type="button"
+          onClick={onClear}
+          className="rounded px-1.5 py-0.5 text-[11px] text-text-disabled hover:bg-surface-hover hover:text-text-3"
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelect(new Date())}
+          className="rounded px-1.5 py-0.5 text-[11px] text-text-3 hover:bg-surface-hover hover:text-text-1"
+        >
+          Today
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LinkedNotesChip({ notes }: { notes: LinkedNote[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded bg-surface-hover px-1.5 py-0.5 text-[11px] text-text-3 hover:bg-white/[0.08]"
+          title={`${notes.length} linked note${notes.length === 1 ? "" : "s"}`}
+        >
+          <Icon name="link" size={11} />
+          <span className="font-mono">{notes.length}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="w-72 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 py-1 text-text-1 shadow-xl"
+      >
+        {notes.map((n) => (
+          <LinkedNoteRow key={n.id} note={n} />
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function LinkedNoteRow({ note }: { note: LinkedNote }) {
+  return (
+    <div className="px-3 py-2 hover:bg-white/[0.05]">
+      {note.title ? (
+        <div className="mb-0.5 text-[11px] font-medium text-text-1">
+          {note.title}
+        </div>
+      ) : null}
+      {note.body ? (
+        <div className="line-clamp-2 text-[11px] leading-[1.4] text-text-3">
+          {note.body}
+        </div>
+      ) : null}
+      <div className="mt-1 font-mono text-[9px] text-text-disabled">
+        {relTime(note.updatedAt)}
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------- title ---------------------------------- */
 
 function TitleField({
   task,
@@ -295,9 +812,73 @@ function TitleField({
           (e.target as HTMLInputElement).blur();
         }
       }}
-      className="mb-5 -mx-1.5 w-[calc(100%+12px)] rounded bg-transparent px-1.5 py-0.5 text-[22px] font-semibold leading-[1.3] tracking-[-0.015em] text-text-1 outline-none hover:bg-surface-hover focus:bg-surface-hover focus:shadow-[inset_0_0_0_1px_var(--border-2)]"
+      className="mb-4 -mx-1.5 w-[calc(100%+12px)] rounded bg-transparent px-1.5 py-1 text-[24px] font-semibold leading-[1.25] tracking-[-0.015em] text-text-1 outline-none hover:bg-surface-hover focus:bg-surface-hover focus:shadow-[inset_0_0_0_1px_var(--border-2)]"
     />
   );
+}
+
+/* ------------------------------- description ------------------------------ */
+
+type SlashItem = {
+  label: string;
+  hint: string;
+  insert: string;
+  caretOffset?: number;
+  kw: string[];
+};
+
+const SLASH_ITEMS: SlashItem[] = [
+  { label: "Heading 1", hint: "h1", insert: "# ", kw: ["h1", "heading"] },
+  { label: "Heading 2", hint: "h2", insert: "## ", kw: ["h2", "heading"] },
+  { label: "Heading 3", hint: "h3", insert: "### ", kw: ["h3", "heading"] },
+  {
+    label: "Bulleted list",
+    hint: "ul",
+    insert: "- ",
+    kw: ["bullet", "list", "ul"],
+  },
+  {
+    label: "Numbered list",
+    hint: "ol",
+    insert: "1. ",
+    kw: ["numbered", "list", "ol"],
+  },
+  {
+    label: "Todo",
+    hint: "todo",
+    insert: "- [ ] ",
+    kw: ["todo", "task", "check"],
+  },
+  { label: "Quote", hint: "quote", insert: "> ", kw: ["quote", "blockquote"] },
+  {
+    label: "Code block",
+    hint: "code",
+    insert: "```\n\n```\n",
+    caretOffset: -5,
+    kw: ["code", "snippet"],
+  },
+  { label: "Divider", hint: "hr", insert: "\n---\n", kw: ["divider", "hr"] },
+  {
+    label: "Link",
+    hint: "link",
+    insert: "[](url)",
+    caretOffset: -6,
+    kw: ["link", "url"],
+  },
+];
+
+type SlashState = { start: number; query: string };
+
+function detectSlash(value: string, caret: number): SlashState | null {
+  const before = value.slice(0, caret);
+  const nlIdx = before.lastIndexOf("\n");
+  const line = before.slice(nlIdx + 1);
+  const m = /(?:^|(?<=\s))\/([\w-]{0,20})$/.exec(line);
+  if (!m) return null;
+  return {
+    start: nlIdx + 1 + (m.index ?? 0),
+    query: m[1] ?? "",
+  };
 }
 
 function DescriptionField({
@@ -309,48 +890,198 @@ function DescriptionField({
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(task.body ?? "");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const [slash, setSlash] = useState<SlashState | null>(null);
+  const [slashIdx, setSlashIdx] = useState(0);
+  const [savedFlash, setSavedFlash] = useState(false);
 
   useEffect(() => setValue(task.body ?? ""), [task.body]);
 
   const save = useMutation({
     mutationFn: (v: string) => api.patchTask(task.id, { body: v || null }),
-    onSuccess: onSaved,
+    onSuccess: () => {
+      onSaved();
+      setSavedFlash(true);
+      setEditing(false);
+    },
     onError: (err) => toastError(err),
   });
 
-  const scheduleSave = (v: string) => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      if (v !== (task.body ?? "")) save.mutate(v);
-    }, 1000);
-  };
+  useEffect(() => {
+    if (!savedFlash) return;
+    const t = setTimeout(() => setSavedFlash(false), 1500);
+    return () => clearTimeout(t);
+  }, [savedFlash]);
 
-  const commit = () => {
-    if (timer.current) clearTimeout(timer.current);
-    if (value !== (task.body ?? "")) save.mutate(value);
+  const dirty = value !== (task.body ?? "");
+
+  const doSave = () => {
+    if (!dirty) {
+      setEditing(false);
+      return;
+    }
+    save.mutate(value);
+  };
+  const doCancel = () => {
+    setValue(task.body ?? "");
+    setSlash(null);
     setEditing(false);
   };
 
   const rendered = useMemo(() => {
-    const src = task.body?.trim() ? task.body : "*No description yet.*";
+    const src = task.body?.trim() ? task.body : "*Add a description…*";
     return marked.parse(src) as string;
   }, [task.body]);
 
+  const filteredSlash = useMemo(() => {
+    if (!slash) return [];
+    const q = slash.query.toLowerCase();
+    if (!q) return SLASH_ITEMS;
+    return SLASH_ITEMS.filter(
+      (it) =>
+        it.label.toLowerCase().includes(q) ||
+        it.hint.includes(q) ||
+        it.kw.some((k) => k.startsWith(q)),
+    );
+  }, [slash]);
+
+  useEffect(() => {
+    setSlashIdx(0);
+  }, [slash]);
+
+  const runDetect = () => {
+    const ta = taRef.current;
+    if (!ta) return;
+    setSlash(detectSlash(ta.value, ta.selectionStart));
+  };
+
+  const applyItem = (it: SlashItem) => {
+    const ta = taRef.current;
+    if (!ta || !slash) return;
+    const caret = ta.selectionStart;
+    const next =
+      value.slice(0, slash.start) + it.insert + value.slice(caret);
+    const newCaret = slash.start + it.insert.length + (it.caretOffset ?? 0);
+    setValue(next);
+    setSlash(null);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(newCaret, newCaret);
+    });
+  };
+
   return (
-    <Section title="Description">
+    <section className="mb-8">
       {editing ? (
-        <textarea
-          // biome-ignore lint/a11y/noAutofocus: focus what user opened
-          autoFocus
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            scheduleSave(e.target.value);
-          }}
-          onBlur={commit}
-          className="min-h-24 w-full resize-y rounded-md bg-surface-hover px-2.5 py-2 text-[13px] leading-[1.6] text-text-2 outline-none shadow-[inset_0_0_0_1px_var(--border-2)]"
-        />
+        <div className="relative">
+          <textarea
+            ref={taRef}
+            // biome-ignore lint/a11y/noAutofocus: focus what user opened
+            autoFocus
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              queueMicrotask(runDetect);
+            }}
+            onSelect={runDetect}
+            onKeyDown={(e) => {
+              if (slash && filteredSlash.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSlashIdx((i) => (i + 1) % filteredSlash.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSlashIdx(
+                    (i) => (i - 1 + filteredSlash.length) % filteredSlash.length,
+                  );
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  const pick = filteredSlash[slashIdx] ?? filteredSlash[0];
+                  if (pick) applyItem(pick);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSlash(null);
+                  return;
+                }
+              }
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                doSave();
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                doCancel();
+              }
+            }}
+            className="min-h-40 w-full resize-y bg-transparent text-[14px] leading-[1.7] text-text-2 outline-none placeholder:text-text-disabled"
+            placeholder="Add a description…  press / for commands"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <span className="flex-1 font-mono text-[10px] text-text-disabled">
+              {save.isPending ? (
+                <span className="text-text-3">saving…</span>
+              ) : dirty ? (
+                <span className="text-amber-300/80">unsaved changes</span>
+              ) : savedFlash ? (
+                <span className="text-emerald-400/80">saved</span>
+              ) : (
+                <>
+                  <Kbd>⌘↵</Kbd> save · <Kbd>esc</Kbd> cancel
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={doCancel}
+              disabled={save.isPending}
+              className="rounded-[3px] px-2.5 py-[3px] text-[11px] font-medium text-text-3 hover:bg-surface-hover disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={doSave}
+              disabled={save.isPending || !dirty}
+              className="rounded-[3px] bg-text-1 px-2.5 py-[3px] text-[11px] font-medium text-surface-0 disabled:opacity-50"
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </button>
+          </div>
+          {slash && filteredSlash.length > 0 ? (
+            <div className="absolute left-0 top-full z-20 mt-1 w-60 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 text-text-1 shadow-xl">
+              {filteredSlash.map((it, i) => (
+                <button
+                  key={it.hint}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    applyItem(it);
+                  }}
+                  onMouseEnter={() => setSlashIdx(i)}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors ${
+                    i === slashIdx
+                      ? "bg-white/[0.06] text-text-1"
+                      : "text-text-3 hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <span className="flex-1">{it.label}</span>
+                  <span className="font-mono text-[10px] text-text-disabled">
+                    /{it.hint}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : (
         // biome-ignore lint/a11y/noStaticElementInteractions: markdown block, click to edit
         <div
@@ -360,12 +1091,12 @@ function DescriptionField({
           }}
           role="button"
           tabIndex={0}
-          className="prose-invert -mx-2.5 min-h-10 cursor-text rounded-md px-2.5 py-2 text-[13px] leading-[1.6] text-text-3 hover:bg-surface-hover"
+          className="card-desc min-h-12 cursor-text text-[14px] leading-[1.7] text-text-2"
           // biome-ignore lint/security/noDangerouslySetInnerHtml: same-origin markdown, XSS via marked hardened elsewhere in project
           dangerouslySetInnerHTML={{ __html: rendered }}
         />
       )}
-    </Section>
+    </section>
   );
 }
 
@@ -386,36 +1117,21 @@ function ChecklistSection({
   const [adding, setAdding] = useState(false);
 
   return (
-    <Section
-      title="Checklist"
-      count={`${done} / ${total}`}
-      action={
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="cursor-pointer text-sm leading-none text-text-disabled hover:text-text-1"
-          aria-label="Add checklist item"
-        >
-          +
-        </button>
-      }
-    >
-      <div className="mb-2.5 flex items-center gap-2.5 font-mono text-[10px] text-text-disabled">
-        <span>{pct}%</span>
-        <div className="h-[2px] flex-1 overflow-hidden rounded-[1px] bg-border-1">
+    <section className="mb-6">
+      <div className="mb-2 flex items-center gap-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
+        <span>Checklist</span>
+        <span className="font-mono normal-case tracking-normal">
+          {done}/{total}
+        </span>
+        <div className="ml-2 h-[3px] flex-1 overflow-hidden rounded-[1px] bg-border-1">
           <div
-            className="h-full"
+            className="h-full transition-[width]"
             style={{ width: `${pct}%`, background: "var(--accent-warm)" }}
           />
         </div>
       </div>
       {items.map((item) => (
-        <ChecklistRow
-          key={item.id}
-          taskId={taskId}
-          item={item}
-          onChanged={onChanged}
-        />
+        <ChecklistRow key={item.id} item={item} onChanged={onChanged} />
       ))}
       {adding || items.length === 0 ? (
         <AddChecklistRow
@@ -438,20 +1154,17 @@ function ChecklistSection({
           add item
         </button>
       )}
-    </Section>
+    </section>
   );
 }
 
 function ChecklistRow({
-  taskId,
   item,
   onChanged,
 }: {
-  taskId: string;
   item: TaskChecklistItem;
   onChanged: () => void;
 }) {
-  void taskId;
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(item.text);
   useEffect(() => setValue(item.text), [item.text]);
@@ -632,26 +1345,46 @@ function AttachmentsSection({
     e.target.value = "";
   };
 
+  if (attachments.length === 0 && !upload.isPending) {
+    return (
+      <section className="mb-6">
+        <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
+          <span>Attachments</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="grid h-20 w-20 cursor-pointer place-items-center rounded-[5px] border border-dashed border-border-2 text-[10px] text-text-disabled hover:border-[#3a3a3a] hover:text-text-3"
+        >
+          + drop
+        </button>
+        <input ref={fileRef} type="file" className="hidden" onChange={onPick} />
+      </section>
+    );
+  }
+
   return (
-    <Section title="Attachments" count={String(attachments.length)}>
-      <div className="grid grid-cols-3 gap-2">
+    <section className="mb-6">
+      <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
+        <span>Attachments</span>
+        <span className="font-mono normal-case tracking-normal">
+          {attachments.length}
+        </span>
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fill,80px)] gap-2">
         {attachments.map((a, i) => (
-          <div key={a.id} className="group/att relative">
+          <div key={a.id} className="group/att relative h-20 w-20">
             <button
               type="button"
               onClick={() => onOpenViewer(i)}
-              className="flex w-full items-center gap-2.5 rounded-[5px] border border-border-1 bg-surface-1 p-2.5 text-left hover:border-border-2 hover:bg-white/[0.03]"
+              title={a.fileName}
+              className="grid h-full w-full place-items-center overflow-hidden rounded-[5px] border border-border-1 bg-surface-1 hover:border-border-2 hover:bg-white/[0.03]"
             >
               <AttachmentTile attachment={a} />
-              <div className="min-w-0">
-                <div className="truncate text-[11px] text-text-1">
-                  {a.fileName}
-                </div>
-                <div className="mt-0.5 font-mono text-[10px] text-text-disabled">
-                  {fmtSize(a.sizeBytes)}
-                </div>
-              </div>
             </button>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate rounded-b-[5px] bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-3 text-[9px] text-white/90">
+              {a.fileName}
+            </div>
             {a.mimeType.startsWith("image/") ? (
               <button
                 type="button"
@@ -667,19 +1400,14 @@ function AttachmentsSection({
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="grid min-h-[52px] cursor-pointer place-items-center rounded-[5px] border border-dashed border-border-2 bg-transparent text-[11px] text-text-disabled hover:border-[#3a3a3a] hover:text-text-3"
+          className="grid h-20 w-20 cursor-pointer place-items-center rounded-[5px] border border-dashed border-border-2 text-[10px] text-text-disabled hover:border-[#3a3a3a] hover:text-text-3"
           disabled={upload.isPending}
         >
-          {upload.isPending ? "uploading…" : "+ drop or click"}
+          {upload.isPending ? "…" : "+ drop"}
         </button>
-        <input
-          ref={fileRef}
-          type="file"
-          className="hidden"
-          onChange={onPick}
-        />
+        <input ref={fileRef} type="file" className="hidden" onChange={onPick} />
       </div>
-    </Section>
+    </section>
   );
 }
 
@@ -687,14 +1415,14 @@ function AttachmentTile({ attachment }: { attachment: TaskAttachment }) {
   const badge = mimeBadge(attachment.mimeType, attachment.fileName);
   if (attachment.thumbnailUrl) {
     return (
-      <div className="relative h-7 w-7 flex-shrink-0 overflow-hidden rounded bg-surface-hover">
+      <div className="relative h-full w-full">
         <img
           src={attachment.thumbnailUrl}
           alt=""
           className="h-full w-full object-cover"
         />
         {attachment.mimeType.startsWith("video/") ? (
-          <span className="absolute inset-0 grid place-items-center text-[10px] text-white/90">
+          <span className="absolute inset-0 grid place-items-center text-[14px] text-white/90">
             ▶
           </span>
         ) : null}
@@ -702,29 +1430,83 @@ function AttachmentTile({ attachment }: { attachment: TaskAttachment }) {
     );
   }
   return (
-    <div className="grid h-7 w-7 flex-shrink-0 place-items-center rounded bg-surface-hover font-mono text-[10px] font-semibold text-text-3">
+    <span className="font-mono text-[11px] font-semibold text-text-3">
       {badge}
-    </div>
+    </span>
   );
 }
 
-/* -------------------------------- comments -------------------------------- */
+/* ---------------------------- merged feed --------------------------------- */
 
-function CommentsSection({
+type FeedItem =
+  | { kind: "comment"; at: string; data: TaskComment }
+  | { kind: "event"; at: string; data: TaskActivityEvent };
+
+function ActivityFeed({
   taskId,
   comments,
+  activity,
   onChanged,
+  composerRef,
 }: {
   taskId: string;
   comments: TaskComment[];
+  activity: TaskActivityEvent[];
   onChanged: () => void;
+  composerRef: React.MutableRefObject<HTMLTextAreaElement | null>;
+}) {
+  const items = useMemo<FeedItem[]>(() => {
+    const merged: FeedItem[] = [
+      ...comments.map<FeedItem>((c) => ({
+        kind: "comment",
+        at: c.createdAt,
+        data: c,
+      })),
+      // "comment" events duplicate the comment itself; drop them so we don't
+      // render "commented" muted line next to the comment block.
+      ...activity
+        .filter((e) => e.kind !== "comment")
+        .map<FeedItem>((e) => ({ kind: "event", at: e.createdAt, data: e })),
+    ];
+    merged.sort((a, b) => (a.at < b.at ? 1 : -1));
+    return merged;
+  }, [comments, activity]);
+
+  return (
+    <section>
+      <Composer taskId={taskId} onSent={onChanged} composerRef={composerRef} />
+      <div className="mt-4 flex flex-col">
+        {items.map((it) =>
+          it.kind === "comment" ? (
+            <CommentRow
+              key={`c-${it.data.id}`}
+              comment={it.data}
+              onChanged={onChanged}
+            />
+          ) : (
+            <EventRow key={`e-${it.data.id}`} event={it.data} />
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Composer({
+  taskId,
+  onSent,
+  composerRef,
+}: {
+  taskId: string;
+  onSent: () => void;
+  composerRef: React.MutableRefObject<HTMLTextAreaElement | null>;
 }) {
   const [body, setBody] = useState("");
   const send = useMutation({
     mutationFn: (b: string) => api.createComment(taskId, { body: b }),
     onSuccess: () => {
       setBody("");
-      onChanged();
+      onSent();
     },
     onError: (err) => toastError(err),
   });
@@ -733,40 +1515,50 @@ function CommentsSection({
     if (v) send.mutate(v);
   };
   return (
-    <Section title="Comments" count={String(comments.length)}>
-      <div className="mb-3.5 rounded-[5px] border border-border-1 bg-surface-1 px-2.5 py-2">
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder="Write a comment…"
-          className="min-h-8 w-full resize-none bg-transparent text-[12px] text-text-1 outline-none placeholder:text-text-disabled"
-        />
-        <div className="mt-1.5 flex items-center gap-2 border-t border-border-1 pt-1.5">
-          <span className="flex-1 font-mono text-[10px] text-text-disabled">
-            markdown ok · <Kbd>⌘↵</Kbd> to send
-          </span>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={send.isPending || !body.trim()}
-            className="rounded-[3px] bg-text-1 px-2.5 py-[3px] text-[11px] font-medium text-surface-0 disabled:opacity-50"
-          >
-            {send.isPending ? "Sending…" : "Comment"}
-          </button>
-        </div>
+    <div className="rounded-[5px] border border-border-1 bg-surface-1 px-2.5 py-2">
+      <textarea
+        ref={composerRef}
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            submit();
+          }
+        }}
+        placeholder="Write a comment…"
+        className="min-h-8 w-full resize-none bg-transparent text-[12px] text-text-1 outline-none placeholder:text-text-disabled"
+      />
+      <div className="mt-1.5 flex items-center gap-2 border-t border-border-1 pt-1.5">
+        <span className="flex-1 font-mono text-[10px] text-text-disabled">
+          markdown ok · <Kbd>⌘↵</Kbd> to send
+        </span>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={send.isPending || !body.trim()}
+          className="rounded-[3px] bg-text-1 px-2.5 py-[3px] text-[11px] font-medium text-surface-0 disabled:opacity-50"
+        >
+          {send.isPending ? "Sending…" : "Comment"}
+        </button>
       </div>
-      <div className="flex flex-col">
-        {comments.map((c) => (
-          <CommentRow key={c.id} comment={c} onChanged={onChanged} />
-        ))}
-      </div>
-    </Section>
+    </div>
+  );
+}
+
+function EventRow({ event }: { event: TaskActivityEvent }) {
+  return (
+    <div className="flex gap-2 py-1 text-[11px] text-text-3">
+      <span className="flex-shrink-0 pt-px font-mono text-[10px] text-text-disabled">
+        {relTime(event.createdAt)}
+      </span>
+      <span className="min-w-0">
+        <span className="text-text-2">
+          {event.actor?.name ?? event.actor?.email ?? "someone"}
+        </span>{" "}
+        {activityText(event.kind, event.payload)}
+      </span>
+    </div>
   );
 }
 
@@ -793,7 +1585,7 @@ function CommentRow({
     onError: (err) => toastError(err),
   });
   return (
-    <div className="group flex gap-2.5 py-2">
+    <div className="group flex gap-2.5 py-2.5">
       <span className="grid h-[22px] w-[22px] flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#3a2a1a] to-accent-warm text-[10px] font-semibold text-[#1a1000]">
         {initials}
       </span>
@@ -810,10 +1602,10 @@ function CommentRow({
               type="button"
               onClick={() => setConfirming(true)}
               disabled={del.isPending}
-              className="ml-auto grid h-5 w-5 place-items-center rounded text-text-disabled opacity-0 transition-colors group-hover:opacity-100 hover:text-rose-300"
+              className="ml-auto grid h-5 w-5 place-items-center rounded text-text-disabled opacity-0 transition-colors group-hover:opacity-100 hover:bg-destructive/15 hover:text-rose-300"
               title="Delete comment"
             >
-              <Icon name="x" size={11} />
+              <Icon name="trash" size={11} />
             </button>
           ) : null}
         </div>
@@ -856,158 +1648,6 @@ function CommentRow({
   );
 }
 
-/* --------------------------------- side col -------------------------------- */
-
-function SideColumn({
-  taskId,
-  detail,
-  milestones,
-  invalidate,
-}: {
-  taskId: string;
-  detail: TaskDetail;
-  milestones: Milestone[];
-  invalidate: () => void;
-}) {
-  void taskId;
-  const t = detail.task;
-  const setMilestone = useMutation({
-    mutationFn: (id: string | null) =>
-      api.patchTask(t.id, { milestoneId: id }),
-    onSuccess: invalidate,
-    onError: (err) => toastError(err),
-  });
-  const setDue = useMutation({
-    mutationFn: (iso: string | null) => api.patchTask(t.id, { dueAt: iso }),
-    onSuccess: invalidate,
-    onError: (err) => toastError(err),
-  });
-  const setAssignees = useMutation({
-    mutationFn: (uids: string[]) =>
-      api.patchTask(t.id, { assigneeIds: uids }),
-    onSuccess: invalidate,
-    onError: (err) => toastError(err),
-  });
-
-  return (
-    <>
-      <Prop label="Milestone">
-        <MilestonePicker
-          milestones={milestones}
-          value={t.milestoneId ?? null}
-          onChange={(id) => setMilestone.mutate(id)}
-          pending={setMilestone.isPending}
-        />
-      </Prop>
-
-      <Prop label="Assignees">
-        <AssigneePicker
-          projectId={t.projectId}
-          value={(t.assignees ?? []).map((a) => a.id)}
-          current={t.assignees ?? []}
-          onChange={(uids) => setAssignees.mutate(uids)}
-          pending={setAssignees.isPending}
-        />
-      </Prop>
-
-      <Prop label="Tags">
-        <TagsPicker task={t} onChanged={invalidate} />
-      </Prop>
-
-      <Prop label="Due date">
-        <input
-          type="date"
-          value={t.dueAt ? t.dueAt.slice(0, 10) : ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setDue.mutate(v ? new Date(`${v}T00:00:00Z`).toISOString() : null);
-          }}
-          className="cursor-pointer rounded bg-transparent px-1.5 py-0.5 font-mono text-[11px] text-text-1 outline-none hover:bg-surface-hover"
-        />
-        {t.dueAt ? (
-          <span className="font-mono text-[10px] text-text-disabled">
-            · {relTime(t.dueAt)}
-          </span>
-        ) : null}
-      </Prop>
-
-      <Prop
-        label={
-          <>
-            Linked notes{" "}
-            <span className="font-mono text-[10px] text-text-disabled">
-              {detail.linkedNotes.length}
-            </span>
-          </>
-        }
-      >
-        <div className="flex flex-col">
-          {detail.linkedNotes.length === 0 ? (
-            <span className="text-[11px] text-text-disabled">— none —</span>
-          ) : (
-            detail.linkedNotes.map((n) => <LinkedNoteRow key={n.id} note={n} />)
-          )}
-        </div>
-      </Prop>
-
-      <Prop label="Activity">
-        <ActivityFeed detail={detail} />
-      </Prop>
-    </>
-  );
-}
-
-function LinkedNoteRow({ note }: { note: LinkedNote }) {
-  return (
-    <div className="-mx-2.5 rounded px-2.5 py-2 hover:bg-surface-hover">
-      {note.title ? (
-        <div className="mb-0.5 text-[11px] font-medium text-text-1">
-          {note.title}
-        </div>
-      ) : null}
-      {note.body ? (
-        <div className="line-clamp-2 text-[11px] leading-[1.4] text-text-3">
-          {note.body}
-        </div>
-      ) : null}
-      <div className="mt-1 font-mono text-[9px] text-text-disabled">
-        {relTime(note.updatedAt)}
-      </div>
-    </div>
-  );
-}
-
-function ActivityFeed({ detail }: { detail: TaskDetail }) {
-  const [showAll, setShowAll] = useState(false);
-  const shown = showAll ? detail.activity : detail.activity.slice(0, 5);
-  return (
-    <div className="flex flex-col gap-1">
-      {shown.map((e) => (
-        <div key={e.id} className="flex gap-2 py-1 text-[11px] text-text-3">
-          <span className="flex-shrink-0 pt-px font-mono text-[10px] text-text-disabled">
-            {relTime(e.createdAt)}
-          </span>
-          <span className="min-w-0">
-            <strong className="font-medium text-text-1">
-              {e.actor?.name ?? e.actor?.email ?? "someone"}
-            </strong>{" "}
-            {activityText(e.kind, e.payload)}
-          </span>
-        </div>
-      ))}
-      {!showAll && detail.activity.length > 5 ? (
-        <button
-          type="button"
-          onClick={() => setShowAll(true)}
-          className="mt-1 self-start text-[10px] text-text-disabled hover:text-text-3"
-        >
-          show all
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 function activityText(
   kind: TaskDetail["activity"][number]["kind"],
   payload: Record<string, unknown>,
@@ -1040,34 +1680,7 @@ function activityText(
   }
 }
 
-/* --------------------------------- helpers -------------------------------- */
-
-function Section({
-  title,
-  count,
-  action,
-  children,
-}: {
-  title: string;
-  count?: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="mb-6">
-      <div className="mb-2.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
-        <span>{title}</span>
-        {count ? (
-          <span className="font-mono text-[10px] normal-case tracking-normal text-text-disabled">
-            {count}
-          </span>
-        ) : null}
-        {action ? <span className="ml-auto">{action}</span> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
+/* --------------------------------- pickers -------------------------------- */
 
 function MilestonePicker({
   milestones,
@@ -1089,19 +1702,17 @@ function MilestonePicker({
         <button
           type="button"
           disabled={pending}
+          title="Milestone"
           className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] transition-colors hover:bg-surface-hover disabled:opacity-50 ${
             selected ? "text-text-1" : "text-text-3"
           }`}
         >
-          {selected ? (
-            <>
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
-              {selected.name}
-            </>
-          ) : (
-            "— none —"
-          )}
-          <Icon name="chevron-down" size={9} className="ml-0.5 text-text-disabled" />
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ background: selected ? "var(--accent-warm)" : "var(--text-disabled)" }}
+          />
+          {selected ? selected.name : "no milestone"}
+          <Icon name="chevron-down" size={9} className="text-text-disabled" />
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -1119,10 +1730,12 @@ function MilestonePicker({
             value === null ? "text-text-1" : "text-text-3"
           }`}
         >
-          <span className="text-[9px] text-text-disabled opacity-0">●</span>
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-transparent" />
           — none —
           {value === null ? (
-            <span className="ml-auto"><Icon name="check" size={10} className="text-text-disabled" /></span>
+            <span className="ml-auto">
+              <Icon name="check" size={10} className="text-text-disabled" />
+            </span>
           ) : null}
         </button>
         {milestones.map((m) => (
@@ -1140,7 +1753,9 @@ function MilestonePicker({
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
             <span className="truncate">{m.name}</span>
             {value === m.id ? (
-              <span className="ml-auto"><Icon name="check" size={10} className="text-text-disabled" /></span>
+              <span className="ml-auto">
+                <Icon name="check" size={10} className="text-text-disabled" />
+              </span>
             ) : null}
           </button>
         ))}
@@ -1179,79 +1794,70 @@ function AssigneePicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <div className="relative flex-1">
-        <div className="flex flex-wrap items-center gap-1">
-          {current.length === 0 ? (
-            <span className="text-[12px] text-text-3">unassigned</span>
-          ) : (
-            current.map((a) => (
+      <div className="flex items-center gap-1">
+        {current.length > 0 ? (
+          <div className="flex -space-x-1.5">
+            {current.slice(0, 3).map((a) => (
               <span
                 key={a.id}
-                className="inline-flex items-center gap-1 rounded-[8px] bg-surface-hover px-1.5 py-px text-[11px] text-text-1"
-                title={a.email}
+                title={a.name ?? a.email}
+                className="grid h-5 w-5 place-items-center rounded-full border border-surface-0 bg-gradient-to-br from-[#3a2a1a] to-accent-warm text-[9px] font-semibold text-[#1a1000]"
               >
-                {a.name ?? a.email}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggle(a.id);
-                  }}
-                  className="opacity-60 hover:opacity-100"
-                  aria-label={`Remove ${a.name ?? a.email}`}
-                >
-                  <Icon name="x" size={9} />
-                </button>
+                {initialsOf(a.name ?? a.email)}
               </span>
-            ))
-          )}
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              disabled={pending}
-              className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1 disabled:opacity-50"
-            >
-              + assign
-            </button>
-          </PopoverTrigger>
-        </div>
-
-        <PopoverContent
-          align="start"
-          sideOffset={6}
-          className="w-56 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 py-1 text-text-1 shadow-xl"
-        >
-          {members.isPending ? (
-            <div className="px-3 py-2 text-[11px] text-text-disabled">
-              Loading…
-            </div>
-          ) : (
-            members.data?.map((m) => (
-              <button
-                key={m.userId}
-                type="button"
-                onClick={() => toggle(m.userId)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
-                  selected.has(m.userId) ? "text-text-1" : "text-text-3"
-                }`}
-              >
-                <span className="truncate">
-                  {m.user.name ?? m.user.email}
-                </span>
-                {selected.has(m.userId) ? (
-                  <span className="ml-auto">
-                    <Icon
-                      name="check"
-                      size={10}
-                      className="text-text-disabled"
-                    />
-                  </span>
-                ) : null}
-              </button>
-            ))
-          )}
-        </PopoverContent>
+            ))}
+            {current.length > 3 ? (
+              <span className="grid h-5 min-w-5 place-items-center rounded-full border border-surface-0 bg-surface-hover px-1 text-[9px] font-medium text-text-3">
+                +{current.length - 3}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={pending}
+            title="Assignees"
+            className="rounded px-1.5 py-0.5 text-[11px] text-text-3 hover:bg-surface-hover disabled:opacity-50"
+          >
+            {current.length === 0 ? "+ assign" : "+"}
+          </button>
+        </PopoverTrigger>
       </div>
+
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="w-56 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 py-1 text-text-1 shadow-xl"
+      >
+        {members.isPending ? (
+          <div className="px-3 py-2 text-[11px] text-text-disabled">
+            Loading…
+          </div>
+        ) : (
+          members.data?.map((m) => (
+            <button
+              key={m.userId}
+              type="button"
+              onClick={() => toggle(m.userId)}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
+                selected.has(m.userId) ? "text-text-1" : "text-text-3"
+              }`}
+            >
+              <span className="truncate">{m.user.name ?? m.user.email}</span>
+              {selected.has(m.userId) ? (
+                <span className="ml-auto">
+                  <Icon
+                    name="check"
+                    size={10}
+                    className="text-text-disabled"
+                  />
+                </span>
+              ) : null}
+            </button>
+          ))
+        )}
+      </PopoverContent>
     </Popover>
   );
 }
@@ -1322,93 +1928,92 @@ function TagsPicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <div className="relative flex-1">
-        <div className="flex flex-wrap items-center gap-1">
-          {(task.tags ?? []).map((tag) => (
-            <span
-              key={tag.id}
-              className={`inline-flex items-center gap-1 rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
-            >
-              {tag.name}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  remove.mutate(tag.id);
-                }}
-                className="opacity-60 hover:opacity-100"
-                aria-label={`Remove ${tag.name}`}
-              >
-                <Icon name="x" size={9} />
-              </button>
-            </span>
-          ))}
-          <PopoverTrigger asChild>
+      <div className="flex flex-wrap items-center gap-1">
+        {(task.tags ?? []).map((tag) => (
+          <span
+            key={tag.id}
+            className={`inline-flex items-center gap-1 rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
+          >
+            {tag.name}
             <button
               type="button"
-              className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1"
+              onClick={(e) => {
+                e.stopPropagation();
+                remove.mutate(tag.id);
+              }}
+              className="opacity-60 hover:opacity-100"
+              aria-label={`Remove ${tag.name}`}
             >
-              + tag
+              <Icon name="x" size={9} />
             </button>
-          </PopoverTrigger>
-        </div>
-
-        <PopoverContent
-          align="start"
-          sideOffset={6}
-          className="w-64 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 text-text-1 shadow-xl"
-        >
-          <input
-            // biome-ignore lint/a11y/noAutofocus: focus what user opened
-            autoFocus
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && query && !exact) {
-                e.preventDefault();
-                create.mutate(query);
-              }
-            }}
-            placeholder="Find or create…"
-            className="w-full border-b border-border-1 bg-transparent px-3 py-2 text-[12px] text-text-1 outline-none placeholder:text-text-disabled"
-          />
-          <div className="max-h-64 overflow-y-auto py-1">
-            {vocab.isPending ? (
-              <div className="px-3 py-2 text-[11px] text-text-disabled">
-                Loading…
-              </div>
-            ) : matches.length === 0 && !query ? (
-              <div className="px-3 py-2 text-[11px] text-text-disabled">
-                No tags yet. Type to create one.
-              </div>
-            ) : (
-              matches.map((tag) => (
-                <TagsRow
-                  key={tag.id}
-                  tag={tag}
-                  applied={applied.has(tag.id)}
-                  onToggle={() => {
-                    if (applied.has(tag.id)) remove.mutate(tag.id);
-                    else apply.mutate(tag.id);
-                  }}
-                  onRename={(name) => rename.mutate({ id: tag.id, name })}
-                  onDelete={() => setConfirmDelete(tag)}
-                />
-              ))
-            )}
-            {query && !exact ? (
-              <button
-                type="button"
-                onClick={() => create.mutate(query)}
-                className="flex w-full items-center gap-2 border-t border-border-1 px-3 py-2 text-left text-[12px] text-text-3 hover:bg-white/[0.05]"
-              >
-                <Icon name="plus" size={10} />
-                Create “{query}”
-              </button>
-            ) : null}
-          </div>
-        </PopoverContent>
+          </span>
+        ))}
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            title="Tags"
+            className="rounded px-1.5 py-0.5 text-[11px] text-text-3 hover:bg-surface-hover"
+          >
+            {(task.tags ?? []).length === 0 ? "+ tag" : "+"}
+          </button>
+        </PopoverTrigger>
       </div>
+
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="w-64 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 text-text-1 shadow-xl"
+      >
+        <input
+          // biome-ignore lint/a11y/noAutofocus: focus what user opened
+          autoFocus
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && query && !exact) {
+              e.preventDefault();
+              create.mutate(query);
+            }
+          }}
+          placeholder="Find or create…"
+          className="w-full border-b border-border-1 bg-transparent px-3 py-2 text-[12px] text-text-1 outline-none placeholder:text-text-disabled"
+        />
+        <div className="max-h-64 overflow-y-auto py-1">
+          {vocab.isPending ? (
+            <div className="px-3 py-2 text-[11px] text-text-disabled">
+              Loading…
+            </div>
+          ) : matches.length === 0 && !query ? (
+            <div className="px-3 py-2 text-[11px] text-text-disabled">
+              No tags yet. Type to create one.
+            </div>
+          ) : (
+            matches.map((tag) => (
+              <TagsRow
+                key={tag.id}
+                tag={tag}
+                applied={applied.has(tag.id)}
+                onToggle={() => {
+                  if (applied.has(tag.id)) remove.mutate(tag.id);
+                  else apply.mutate(tag.id);
+                }}
+                onRename={(name) => rename.mutate({ id: tag.id, name })}
+                onDelete={() => setConfirmDelete(tag)}
+              />
+            ))
+          )}
+          {query && !exact ? (
+            <button
+              type="button"
+              onClick={() => create.mutate(query)}
+              className="flex w-full items-center gap-2 border-t border-border-1 px-3 py-2 text-left text-[12px] text-text-3 hover:bg-white/[0.05]"
+            >
+              <Icon name="plus" size={10} />
+              Create “{query}”
+            </button>
+          ) : null}
+        </div>
+      </PopoverContent>
 
       <Dialog
         open={confirmDelete !== null}
@@ -1536,24 +2141,7 @@ function TagsRow({
   );
 }
 
-function Prop({
-  label,
-  children,
-}: {
-  label: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
-        {label}
-      </div>
-      <div className="-mx-2 flex items-center gap-1.5 rounded px-2 py-1 text-[12px] text-text-1">
-        {children}
-      </div>
-    </div>
-  );
-}
+/* --------------------------------- helpers -------------------------------- */
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
@@ -1561,13 +2149,6 @@ function Kbd({ children }: { children: ReactNode }) {
       {children}
     </span>
   );
-}
-
-function fmtSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function mimeBadge(mime: string, name: string): string {
