@@ -171,8 +171,14 @@ function Editor({
     : null;
 
   const snapshotRef = useRef<Map<string, Block>>(new Map());
+  // BN block-id → server UUID map. Persists across saves so a nanoid-only
+  // block doesn't remint on every keystroke.
+  const idMapRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     snapshotRef.current = new Map(initialBlocks.map((b) => [b.id, b]));
+    // Seed the id map with server-truth: every migrated block's id IS the
+    // UUID we already stored, so BN uses that same id → identity mapping.
+    for (const b of initialBlocks) idMapRef.current.set(b.id, b.id);
   }, [initialBlocks]);
 
   const editor = useCreateBlockNote({
@@ -345,7 +351,11 @@ function Editor({
   const saveBlocks = useMutation({
     mutationFn: async () => {
       const current = editor.document as SchemaBlock[];
-      const desired = blockNoteToBlocks(current, snapshotRef.current);
+      const desired = blockNoteToBlocks(
+        current,
+        snapshotRef.current,
+        idMapRef.current,
+      );
       const snapshot = snapshotRef.current;
 
       const upserts: BlockInput[] = [];
@@ -819,15 +829,36 @@ function blocksToBlockNote(
   return build(null);
 }
 
+// BlockNote assigns nanoid-style block ids; our `blocks.id` column is uuid and
+// the API's Zod validator rejects anything else. On the first save of a fresh
+// block we mint a real UUID, remember the mapping so `parent_id` references
+// resolve, and hand the mapped id back to the editor so subsequent saves round
+// -trip cleanly instead of re-minting on every keystroke.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (s: string): boolean => UUID_RE.test(s);
+
 function blockNoteToBlocks(
   tree: SchemaBlock[],
   prior: Map<string, Block>,
+  idMap: Map<string, string>,
 ): BlockInput[] {
   const out: BlockInput[] = [];
+  const resolveId = (raw: string): string => {
+    if (isUuid(raw)) {
+      idMap.set(raw, raw);
+      return raw;
+    }
+    const cached = idMap.get(raw);
+    if (cached) return cached;
+    const fresh = crypto.randomUUID();
+    idMap.set(raw, fresh);
+    return fresh;
+  };
   const walk = (nodes: SchemaBlock[], parentId: string | null) => {
     const keys = generateNKeysBetween(null, null, nodes.length);
     nodes.forEach((n, i) => {
-      const id = n.id;
+      const id = resolveId(n.id);
       const type = n.type as Block["type"];
       let content: TextBlockContent | { text?: string } | Record<string, unknown>;
       if (TEXT_TYPES.has(type)) {

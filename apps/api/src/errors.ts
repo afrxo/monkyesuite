@@ -14,6 +14,7 @@ export type ErrorCode =
   | "conflict"
   | "gone"
   | "validation_error"
+  | "server_error"
   | "service_unavailable";
 
 const STATUS: Record<ErrorCode, ContentfulStatusCode> = {
@@ -24,6 +25,7 @@ const STATUS: Record<ErrorCode, ContentfulStatusCode> = {
   conflict: 409,
   gone: 410,
   validation_error: 422,
+  server_error: 500,
   service_unavailable: 503,
 };
 
@@ -86,7 +88,8 @@ const DB_DOWN_CODES = new Set([
 
 export function toHttpError(err: unknown): HttpError {
   if (err instanceof HttpError) return err;
-  const code = (err as { code?: string } | null)?.code;
+  const anyErr = err as { code?: string; cause?: { code?: string } } | null;
+  const code = anyErr?.code ?? anyErr?.cause?.code;
   if (code && DB_DOWN_CODES.has(code)) {
     return new HttpError(
       "service_unavailable",
@@ -94,5 +97,9 @@ export function toHttpError(err: unknown): HttpError {
       5,
     );
   }
-  return new HttpError("service_unavailable", "Unexpected server error.", 5);
+  const msg = (err as { message?: string } | null)?.message;
+  return new HttpError(
+    "server_error",
+    msg ? `Server error: ${msg}` : "Unexpected server error.",
+  );
 }

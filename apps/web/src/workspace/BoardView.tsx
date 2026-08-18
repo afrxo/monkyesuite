@@ -17,6 +17,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   type DragEvent,
   type FormEvent,
+  Fragment,
   forwardRef,
   useImperativeHandle,
   useRef,
@@ -391,43 +392,62 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
                 dropTarget.beforeId === null
               }
               dragging={!!drag}
+              footer={
+                <NewTask
+                  projectId={projectId}
+                  status={status}
+                  milestoneId={
+                    milestoneFilter === "all" ? null : milestoneFilter
+                  }
+                  editing={addingIn === status}
+                  onOpen={() => setAddingIn(status)}
+                  onClose={() => setAddingIn(null)}
+                  onChanged={onChanged}
+                />
+              }
             >
               {shown.map((task) => (
-                <Card
-                  key={task.id}
-                  task={task}
-                  projectId={projectId}
-                  projectSlug={projectSlug}
-                  milestoneName={
-                    milestoneFilter === "all" && task.milestoneId
-                      ? (board.milestones.find((m) => m.id === task.milestoneId)
-                          ?.name ?? null)
-                      : null
-                  }
-                  onDragStart={() => setDrag({ taskId: task.id, from: status })}
-                  onDragCancel={clearDrag}
-                  onDropBefore={() => drop(status, task.id)}
-                  onHoverBefore={() => hoverBefore(status, task.id)}
-                  isDropTarget={
-                    !!drag &&
-                    dropTarget?.status === status &&
-                    dropTarget.beforeId === task.id &&
-                    drag.taskId !== task.id
-                  }
-                  isDragging={drag?.taskId === task.id}
-                  onChanged={onChanged}
-                  onOpen={onOpenCard ? () => onOpenCard(task.id) : undefined}
-                />
+                <Fragment key={task.id}>
+                  <DropSlot
+                    active={
+                      !!drag &&
+                      dropTarget?.status === status &&
+                      dropTarget.beforeId === task.id &&
+                      drag.taskId !== task.id
+                    }
+                    visible={!!drag}
+                    onHover={() => hoverBefore(status, task.id)}
+                    onDrop={() => drop(status, task.id)}
+                  />
+                  <Card
+                    task={task}
+                    projectId={projectId}
+                    projectSlug={projectSlug}
+                    milestoneName={
+                      milestoneFilter === "all" && task.milestoneId
+                        ? (board.milestones.find(
+                            (m) => m.id === task.milestoneId,
+                          )?.name ?? null)
+                        : null
+                    }
+                    onDragStart={() =>
+                      setDrag({ taskId: task.id, from: status })
+                    }
+                    onDragCancel={clearDrag}
+                    onDropBefore={() => drop(status, task.id)}
+                    onHoverBefore={() => hoverBefore(status, task.id)}
+                    isDropTarget={
+                      !!drag &&
+                      dropTarget?.status === status &&
+                      dropTarget.beforeId === task.id &&
+                      drag.taskId !== task.id
+                    }
+                    isDragging={drag?.taskId === task.id}
+                    onChanged={onChanged}
+                    onOpen={onOpenCard ? () => onOpenCard(task.id) : undefined}
+                  />
+                </Fragment>
               ))}
-              <NewTask
-                projectId={projectId}
-                status={status}
-                milestoneId={milestoneFilter === "all" ? null : milestoneFilter}
-                editing={addingIn === status}
-                onOpen={() => setAddingIn(status)}
-                onClose={() => setAddingIn(null)}
-                onChanged={onChanged}
-              />
             </Lane>
           );
         })}
@@ -477,6 +497,7 @@ function Lane({
   dragging,
   onAdd,
   children,
+  footer,
 }: {
   status: TaskStatus;
   count: number;
@@ -486,6 +507,7 @@ function Lane({
   dragging: boolean;
   onAdd: () => void;
   children: React.ReactNode;
+  footer?: React.ReactNode;
 }) {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drag-drop lane target
@@ -517,12 +539,12 @@ function Lane({
           <Icon name="plus" size={13} />
         </button>
       </div>
-      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2.5">
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2.5">
         {children}
         {dragging ? (
           // biome-ignore lint/a11y/noStaticElementInteractions: drop-end zone
           <div
-            className="min-h-[40px] flex-1"
+            className="relative -my-1 flex h-2 shrink-0 items-center"
             onDragOver={(e) => {
               e.preventDefault();
               onHoverEnd();
@@ -534,7 +556,7 @@ function Lane({
             }}
           >
             <div
-              className={`h-[2px] rounded-full transition-opacity duration-75 ${
+              className={`h-[2px] w-full rounded-full transition-opacity duration-75 ${
                 isEndTarget
                   ? "bg-accent-warm opacity-100"
                   : "bg-transparent opacity-0"
@@ -542,7 +564,58 @@ function Lane({
             />
           </div>
         ) : null}
+        {footer}
+        {dragging ? (
+          // biome-ignore lint/a11y/noStaticElementInteractions: trailing lane fill
+          <div
+            className="min-h-[40px] flex-1"
+            onDragOver={(e) => {
+              e.preventDefault();
+              onHoverEnd();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDropEnd();
+            }}
+          />
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function DropSlot({
+  active,
+  visible,
+  onHover,
+  onDrop,
+}: {
+  active: boolean;
+  visible: boolean;
+  onHover: () => void;
+  onDrop: () => void;
+}) {
+  if (!visible) return null;
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drop slot
+    <div
+      className="relative -my-1 flex h-2 shrink-0 items-center"
+      onDragOver={(e) => {
+        e.preventDefault();
+        onHover();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDrop();
+      }}
+    >
+      <div
+        className={`h-[2px] w-full rounded-full transition-opacity duration-75 ${
+          active ? "bg-accent-warm opacity-100" : "bg-transparent opacity-0"
+        }`}
+      />
     </div>
   );
 }
@@ -593,6 +666,12 @@ function Card({
       style={{ willChange: "transform" }}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
+        // suppress the native drag-ghost — origin card fade + drop indicator
+        // give richer feedback than a translucent card follow-cursor.
+        const blank = document.createElement("canvas");
+        blank.width = 1;
+        blank.height = 1;
+        e.dataTransfer.setDragImage(blank, 0, 0);
         draggedRef.current = true;
         onDragStart();
       }}
@@ -613,7 +692,7 @@ function Card({
         if (target.closest("button")) return;
         onOpen?.();
       }}
-      className="group relative cursor-pointer overflow-hidden rounded-md border border-border-1 bg-surface-1 text-sm leading-[1.4] hover:border-border-2 hover:bg-white/[0.03] transition-colors duration-75 active:cursor-grabbing data-[dragging]:opacity-40 data-[drop-target]:before:pointer-events-none data-[drop-target]:before:absolute data-[drop-target]:before:inset-x-0 data-[drop-target]:before:-top-[5px] data-[drop-target]:before:h-[2px] data-[drop-target]:before:rounded-full data-[drop-target]:before:bg-accent-warm data-[drop-target]:before:content-['']"
+      className="group relative cursor-pointer overflow-hidden rounded-md border border-border-1 bg-surface-1 text-sm leading-[1.4] hover:border-border-2 hover:bg-white/[0.03] transition-colors duration-75 active:cursor-grabbing data-[dragging]:opacity-40"
     >
       {task.coverUrl ? (
         <div className="h-[112px] w-full overflow-hidden bg-surface-hover">
