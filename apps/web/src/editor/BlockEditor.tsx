@@ -734,7 +734,12 @@ function Editor({
             <SideMenuController
               floatingUIOptions={{
                 useFloatingOptions: {
-                  placement: "left-start",
+                  // "left-start" pinned the menu to the block's top edge (its
+                  // BN default offsets were calibrated for their font sizes).
+                  // "left" centers the menu vertically against the block —
+                  // for single-line blocks that IS the first line, and for
+                  // multi-line blocks it lands close enough not to jump.
+                  placement: "left",
                   middleware: [floatingOffset({ crossAxis: 0 })],
                 },
               }}
