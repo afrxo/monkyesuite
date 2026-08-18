@@ -104,12 +104,6 @@ function WorkspacePage() {
     return null;
   })();
 
-  const activeMilestoneName =
-    activeMilestone === "all"
-      ? null
-      : (board.data?.milestones.find((m) => m.id === activeMilestone)?.name ??
-        null);
-
   const createDoc = async () => {
     const doc = await api.createDoc(id, { title: "Untitled" });
     qc.invalidateQueries({ queryKey: ["docs", id] });
@@ -121,7 +115,6 @@ function WorkspacePage() {
       <Topbar
         project={project.data}
         members={members.data ?? []}
-        activeMilestoneName={activeMilestoneName}
         onQuickAdd={() => {
           setDoc(null);
           setTimeout(() => boardRef.current?.focusQuickAdd(), 0);

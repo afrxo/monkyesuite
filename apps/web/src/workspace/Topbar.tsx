@@ -17,16 +17,10 @@ import { ApiError, api } from "../lib/api";
 type Props = {
   project: ProjectDetail;
   members: Membership[];
-  activeMilestoneName: string | null;
   onQuickAdd: () => void;
 };
 
-export function Topbar({
-  project,
-  members,
-  activeMilestoneName,
-  onQuickAdd,
-}: Props) {
+export function Topbar({ project, members, onQuickAdd }: Props) {
   return (
     <AppHeader
       activeRoute="projects"
@@ -42,24 +36,6 @@ export function Topbar({
           <span className="text-text-disabled">/</span>
           <span className="font-semibold tracking-[-0.01em] text-text-1">
             {project.name}
-          </span>
-          <span className="hidden items-center gap-2 pl-3 text-[11px] text-text-disabled md:flex">
-            <span className="flex items-center gap-1.5 text-delta-up">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-delta-up shadow-[0_0_6px_currentColor]" />
-              {capitalize(project.status)}
-            </span>
-            <span>·</span>
-            <span>
-              Milestone:{" "}
-              <span className="text-text-3">
-                {activeMilestoneName ?? "All"}
-              </span>
-            </span>
-            <span>·</span>
-            <span>
-              {project.counts.openTasks} open task
-              {project.counts.openTasks === 1 ? "" : "s"}
-            </span>
           </span>
         </>
       }
@@ -222,10 +198,6 @@ function InvitePopover({
       </p>
     </div>
   );
-}
-
-function capitalize(s: string): string {
-  return s ? (s[0]?.toUpperCase() ?? "") + s.slice(1) : s;
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
