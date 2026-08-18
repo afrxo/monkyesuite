@@ -51,6 +51,14 @@ function WorkspacePage() {
   const boardRef = useRef<BoardViewHandle>(null);
   const [mobileSheet, setMobileSheet] = useState<"left" | "right" | null>(null);
 
+  useEffect(() => {
+    if (!project.data) return;
+    document.title = `${project.data.name} — monkyesuite`;
+    return () => {
+      document.title = "monkyesuite — Pulse";
+    };
+  }, [project.data]);
+
   // Kbd shortcuts (N / ⌘K). ⌘P is stubbed on the doc header.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
