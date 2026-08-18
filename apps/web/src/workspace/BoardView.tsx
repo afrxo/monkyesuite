@@ -131,6 +131,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
 ) {
   const qc = useQueryClient();
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const hoverBefore = (status: TaskStatus, beforeId: string | null) => {
     setDropTarget((prev) =>
@@ -141,6 +142,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
   };
   const clearDrag = () => {
     setDrag(null);
+    setDragHeight(null);
     setDropTarget(null);
   };
   const [view, setView] = useState<"board" | "list" | "timeline">("board");
@@ -392,6 +394,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
                 dropTarget.beforeId === null
               }
               dragging={!!drag}
+              dragHeight={dragHeight}
               footer={
                 <NewTask
                   projectId={projectId}
@@ -416,6 +419,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
                       drag.taskId !== task.id
                     }
                     visible={!!drag}
+                    ghostHeight={dragHeight}
                     onHover={() => hoverBefore(status, task.id)}
                     onDrop={() => drop(status, task.id)}
                   />
@@ -430,9 +434,10 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
                           )?.name ?? null)
                         : null
                     }
-                    onDragStart={() =>
-                      setDrag({ taskId: task.id, from: status })
-                    }
+                    onDragStart={(h) => {
+                      setDrag({ taskId: task.id, from: status });
+                      setDragHeight(h);
+                    }}
                     onDragCancel={clearDrag}
                     onDropBefore={() => drop(status, task.id)}
                     onHoverBefore={() => hoverBefore(status, task.id)}
@@ -495,6 +500,7 @@ function Lane({
   onHoverEnd,
   isEndTarget,
   dragging,
+  dragHeight,
   onAdd,
   children,
   footer,
@@ -505,6 +511,7 @@ function Lane({
   onHoverEnd: () => void;
   isEndTarget: boolean;
   dragging: boolean;
+  dragHeight: number | null;
   onAdd: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
@@ -542,27 +549,13 @@ function Lane({
       <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2.5">
         {children}
         {dragging ? (
-          // biome-ignore lint/a11y/noStaticElementInteractions: drop-end zone
-          <div
-            className="relative -my-1 flex h-2 shrink-0 items-center"
-            onDragOver={(e) => {
-              e.preventDefault();
-              onHoverEnd();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onDropEnd();
-            }}
-          >
-            <div
-              className={`h-[2px] w-full rounded-full transition-opacity duration-75 ${
-                isEndTarget
-                  ? "bg-accent-warm opacity-100"
-                  : "bg-transparent opacity-0"
-              }`}
-            />
-          </div>
+          <DropSlot
+            active={isEndTarget}
+            visible
+            ghostHeight={dragHeight}
+            onHover={onHoverEnd}
+            onDrop={onDropEnd}
+          />
         ) : null}
         {footer}
         {dragging ? (
@@ -588,15 +581,35 @@ function Lane({
 function DropSlot({
   active,
   visible,
+  ghostHeight,
   onHover,
   onDrop,
 }: {
   active: boolean;
   visible: boolean;
+  ghostHeight: number | null;
   onHover: () => void;
   onDrop: () => void;
 }) {
   if (!visible) return null;
+  if (active && ghostHeight) {
+    return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drop ghost
+      <div
+        style={{ height: ghostHeight }}
+        className="shrink-0 rounded-md border-2 border-dashed border-accent-warm/60 bg-accent-warm/10"
+        onDragOver={(e) => {
+          e.preventDefault();
+          onHover();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDrop();
+        }}
+      />
+    );
+  }
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drop slot
     <div
@@ -611,11 +624,7 @@ function DropSlot({
         onDrop();
       }}
     >
-      <div
-        className={`h-[2px] w-full rounded-full transition-opacity duration-75 ${
-          active ? "bg-accent-warm opacity-100" : "bg-transparent opacity-0"
-        }`}
-      />
+      <div className="h-[2px] w-full rounded-full bg-transparent" />
     </div>
   );
 }
@@ -638,7 +647,7 @@ function Card({
   projectId: string;
   projectSlug: string;
   milestoneName: string | null;
-  onDragStart: () => void;
+  onDragStart: (height: number) => void;
   onDragCancel: () => void;
   onDropBefore: () => void;
   onHoverBefore: () => void;
@@ -666,14 +675,9 @@ function Card({
       style={{ willChange: "transform" }}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
-        // suppress the native drag-ghost — origin card fade + drop indicator
-        // give richer feedback than a translucent card follow-cursor.
-        const blank = document.createElement("canvas");
-        blank.width = 1;
-        blank.height = 1;
-        e.dataTransfer.setDragImage(blank, 0, 0);
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         draggedRef.current = true;
-        onDragStart();
+        onDragStart(rect.height);
       }}
       onDragEnd={() => {
         setTimeout(() => {

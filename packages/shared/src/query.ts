@@ -269,15 +269,23 @@ const textContentSchema = z.object({
 });
 
 // Per-type props. Heading level clamped to 1..3; check items carry `checked`.
-// Everything else props-empty for Phase 1.
-const emptyProps = z.object({}).strict();
-const headingProps = z.object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]) }).strict();
-const checkProps = z.object({ checked: z.boolean() }).strict();
+// BlockNote decorates every block with baseline props (textColor,
+// backgroundColor, textAlignment) so schemas use catchall(unknown) — the DB
+// stores the whole bag; only the fields we branch on are enforced here.
+const emptyProps = z.object({}).catchall(z.unknown());
+const headingProps = z
+  .object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]) })
+  .catchall(z.unknown());
+const checkProps = z
+  .object({ checked: z.boolean() })
+  .catchall(z.unknown());
 
 // Non-text block content shapes. Code stores raw text; image / divider have
 // no textual content and lean on props for state.
-const codeContent = z.object({ text: z.string().max(100_000) }).strict();
-const emptyContent = z.object({}).strict();
+const codeContent = z
+  .object({ text: z.string().max(100_000) })
+  .catchall(z.unknown());
+const emptyContent = z.object({}).catchall(z.unknown());
 const codeProps = z
   .object({
     language: z.string().max(40).optional(),
