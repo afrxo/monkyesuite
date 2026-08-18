@@ -53,7 +53,7 @@ export function NotesRail({ projectId, projectSlug, onOpenCard }: Props) {
           Activity
         </Tab>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="ws-scroll flex-1 overflow-y-auto p-4">
         {tab === "notes" ? (
           <NotesTab
             projectId={projectId}

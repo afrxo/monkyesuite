@@ -61,22 +61,21 @@
  * items with p-3 around the icon and text-base labels; both are too big
  * against the rest of the workspace.
  */
-/* Kill the outer popover shell — shadcn's Popover wraps the menu in its own
-   card, producing the ghosted rectangle behind. */
-[data-radix-popper-content-wrapper]:has(.bn-suggestion-menu),
-.bn-popover:has(.bn-suggestion-menu),
-.bn-suggestion-menu-wrapper {
+/* Kill the outer popover shell — BlockNote's GenericPopover wraps the menu in
+   a FloatingPortal div; whatever theme classes land on it, strip the box. */
+*:has(> .bn-suggestion-menu) {
   background: transparent !important;
   box-shadow: none !important;
   border: none !important;
   padding: 0 !important;
+  ring: 0 !important;
 }
 
 .bn-suggestion-menu {
   background: var(--surface-1) !important;
   border: 1px solid var(--border-1) !important;
   color: var(--text-2) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
   border-radius: 6px !important;
   padding: 4px !important;
   min-width: 240px !important;
