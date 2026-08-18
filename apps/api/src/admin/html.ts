@@ -87,7 +87,6 @@ export const ASSETS = {
 } as const;
 
 export const STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap');
 :root{
   --surface-0:#0c0c0d;--surface-1:#161616;--surface-hover:rgba(255,255,255,0.03);
   --border-1:rgba(255,255,255,0.06);--border-2:rgba(255,255,255,0.05);
@@ -317,7 +316,6 @@ export function bare(title: string, body: Raw): string {
 <meta name="robots" content="noindex,nofollow">
 <title>${escapeHtml(title)}</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap');
 *{box-sizing:border-box}
 html,body{scrollbar-width:none}
 html::-webkit-scrollbar,body::-webkit-scrollbar{display:none}
