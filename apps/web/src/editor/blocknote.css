@@ -54,9 +54,69 @@
   background: var(--accent-warm-soft, rgba(212, 162, 76, 0.25));
 }
 
-/* Slash menu (shadcn skin ships with its own popover shell — just tune it). */
+/*
+ * Slash menu skin — matches the sidebar's popover system: surface-1 shell,
+ * border-1 edge, white/[0.05] hover, small muted group labels, tighter item
+ * padding than shadcn's dropdown default. BlockNote's shadcn skin renders
+ * items with p-3 around the icon and text-base labels; both are too big
+ * against the rest of the workspace.
+ */
 .bn-suggestion-menu {
-  background: var(--surface-1);
-  border: 1px solid var(--border-1);
-  color: var(--text-2);
+  background: var(--surface-1) !important;
+  border: 1px solid var(--border-1) !important;
+  color: var(--text-2) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+  border-radius: 6px !important;
+  padding: 4px !important;
+  min-width: 240px !important;
+  max-height: 340px !important;
+  ring: 0 !important;
+  font-family: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
 }
+.bn-suggestion-menu [role="option"] {
+  padding: 6px 8px !important;
+  gap: 8px !important;
+  border-radius: 4px !important;
+  color: var(--text-2) !important;
+  cursor: pointer;
+}
+.bn-suggestion-menu [role="option"]:hover,
+.bn-suggestion-menu [role="option"][aria-selected="true"] {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--text-1) !important;
+}
+/* Icon wrapper — the default p-3 makes the row 40px tall; collapse it. */
+.bn-suggestion-menu [role="option"] [data-position="left"] {
+  padding: 0 !important;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--text-4);
+  flex-shrink: 0;
+}
+.bn-suggestion-menu [role="option"] [data-position="left"] svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+/* Title + subtext block */
+.bn-suggestion-menu [role="option"] > div:not([data-position]) > div:first-child {
+  font-size: 13px !important;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.bn-suggestion-menu [role="option"] > div:not([data-position]) > div:last-child {
+  font-size: 11px !important;
+  color: var(--text-disabled) !important;
+  line-height: 1.3;
+}
+/* Group label ("Basic blocks", "Callouts", "Other") — small caps muted. */
+.bn-suggestion-menu > div:not([role="option"]):not([role="listbox"]) {
+  padding: 8px 8px 4px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-disabled) !important;
+}
+
