@@ -303,7 +303,14 @@ body {
   font-family: var(--font-sans);
   scrollbar-width: none;
 }
-html { scrollbar-width: none; }
+/* App-wide zoom. Behaves like the browser's own Cmd+- : `zoom` on the root
+   element scales the initial containing block, so viewport units, fixed
+   overlays and modals all scale with the page rather than needing per-site
+   compensation. Change the one number to retune; 1 restores 100%. */
+html {
+  zoom: 0.9;
+  scrollbar-width: none;
+}
 html::-webkit-scrollbar,
 body::-webkit-scrollbar { display: none; }
 
