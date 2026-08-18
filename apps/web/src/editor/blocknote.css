@@ -42,37 +42,37 @@
  * Notion-style faint dotted outline on the block under the cursor + on hover.
  * Signals editability without competing with the text.
  */
-/* Only outline LEAF blocks — a block whose content doesn't wrap another
-   .bn-block-content. Otherwise BN's nested list/callout structure paints
-   an outline on every ancestor and the rectangles stack. */
-.bn-editor .bn-block-content:not(:has(.bn-block-content)) {
+/*
+ * Notion-style block affordance — subtle background stripe on the block under
+ * the cursor + on hover, always faintly visible. Uses background rather than
+ * outline so adjacent blocks don't overlap or paint bounding rectangles.
+ */
+.bn-editor .bn-block > .bn-block-content {
   border-radius: 4px;
-  transition: outline-color 120ms ease;
-  outline: 1.5px dashed rgba(255, 255, 255, 0.16);
-  outline-offset: 3px;
+  padding-inline: 6px !important;
+  margin-inline: -6px;
+  transition: background-color 120ms ease;
+  background-color: rgba(255, 255, 255, 0.02);
 }
-.bn-editor .bn-block:hover > .bn-block-content:not(:has(.bn-block-content)),
-.bn-editor .bn-block-content:not(:has(.bn-block-content)):focus-within {
-  outline-color: rgba(255, 255, 255, 0.32);
+.bn-editor .bn-block:hover > .bn-block-content,
+.bn-editor .bn-block > .bn-block-content:focus-within {
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 /*
- * Empty-block placeholder — BlockNote emits "Enter text or type '/' for
- * commands" on the current empty block via a data attribute. Ensure it's
- * visible against the dark surface (some skins render it at 0.3 opacity).
+ * Empty-block placeholder — BN injects a stylesheet rule that targets the
+ * :after of any content element whose only child is a trailing break, and
+ * sets its `content` to the placeholder text ("Enter text or type '/' for
+ * commands"). Give it a visible color/opacity so it doesn't disappear against
+ * the dark surface. The pointer-events guard keeps it from stealing clicks.
  */
-.bn-editor .bn-block-content[data-is-empty-and-focused="true"] > *:first-child::before,
-.bn-editor .bn-inline-content:empty::before {
+.bn-editor .bn-block-content:has(.ProseMirror-trailingBreak:only-child)::after,
+.bn-editor .bn-block-content[data-is-empty-and-focused="true"]::after,
+.bn-editor .bn-block-content[data-is-only-empty-block]::after {
   color: var(--text-disabled) !important;
   opacity: 1 !important;
-}
-/* Cover the case where BN uses a different selector on the last trailing
-   paragraph — apply the same muted color to any placeholder pseudo. */
-.bn-editor [data-placeholder]::before {
-  color: var(--text-disabled) !important;
-  opacity: 1 !important;
-  content: attr(data-placeholder) !important;
   pointer-events: none;
+  font-style: normal;
 }
 
 .bn-editor .bn-block-content p,

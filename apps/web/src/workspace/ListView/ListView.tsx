@@ -218,12 +218,12 @@ export function ListView({
         ) : null}
       </div>
 
-      {/* Scroll area = the grid */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: roving-tabindex
-          list; keyboard nav is handled here and focus moves to child rows. */}
+      {/* Scroll area = the list: a single roving-tabindex focus zone; arrows
+          move focus onto child rows, so the container owns tabIndex + keydown. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: keydown delegates to rows */}
       <div
         ref={gridRef}
-        aria-label="Tasks"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: intentional focus zone
         tabIndex={0}
         onKeyDown={onKeyDown}
         className="min-h-0 flex-1 overflow-y-auto outline-none"

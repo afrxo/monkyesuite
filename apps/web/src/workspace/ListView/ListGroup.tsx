@@ -47,11 +47,9 @@ export function ListGroup({
     : "bg-transparent border border-border-2";
 
   return (
-    <div role="rowgroup">
+    <div>
       {!flat ? (
-        <div
-          className="sticky top-8 z-10 flex items-center gap-2.5 border-b border-border-1 bg-surface-1 px-4 py-1.5"
-        >
+        <div className="sticky top-8 z-10 flex items-center gap-2.5 border-b border-border-1 bg-surface-1 px-4 py-1.5">
           <button
             type="button"
             onClick={onToggleCollapse}

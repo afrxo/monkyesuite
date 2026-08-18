@@ -163,9 +163,9 @@ export function ListRow({
   const extraAssignees = assignees.length - shownAssignees.length;
 
   return (
-    // Plain clickable div matches the board Card pattern; roving tabindex +
-    // container-level key handling give real keyboard nav without ARIA-grid
-    // roles (which the toolchain's a11y rules reject on non-table elements).
+    // Plain clickable div (board Card pattern) + roving tabindex give real
+    // keyboard nav; a button role would be invalid (nested expander button).
+    // biome-ignore lint/a11y/noStaticElementInteractions: intentional composite row
     <div
       ref={registerRow}
       tabIndex={focused ? 0 : -1}
@@ -275,7 +275,6 @@ export function ListRow({
           <span
             className="h-5 w-5 rounded-full border border-dashed border-border-2"
             title="Unassigned"
-            aria-label="Unassigned"
           />
         ) : (
           <div className="flex items-center -space-x-1.5">
