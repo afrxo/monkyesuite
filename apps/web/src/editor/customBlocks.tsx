@@ -12,6 +12,7 @@
 // interceptor in BlockEditor converts it to a refEmbed if the id is linked.
 
 import { createReactBlockSpec } from "@blocknote/react";
+import { Skeleton } from "../components/Skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
@@ -142,11 +143,16 @@ function RefEmbedCard({
           background: "var(--surface-1)",
           padding: 10,
           borderRadius: 6,
-          color: "var(--text-disabled)",
-          fontSize: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
         }}
       >
-        Loading ref…
+        <Skeleton w={34} h={34} className="rounded" />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+          <Skeleton w="46%" h={11} />
+          <Skeleton w="28%" h={9} />
+        </div>
       </div>
     );
   }

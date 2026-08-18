@@ -34,6 +34,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
+import { Skeleton, useDelayedFlag } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { DatePicker } from "./DatePicker";
 import { milestoneColor } from "./milestone-color";
@@ -810,6 +811,17 @@ function DocRow({
   const [over, setOver] = useState(false);
   const draggedRef = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const qc = useQueryClient();
+
+  // Warm the doc's blocks on hover. Doc switching is the single most repeated
+  // navigation in the workspace and the editor can't render without its
+  // blocks, so this is what turns a click into an instant open.
+  const prefetchDoc = () => {
+    qc.prefetchQuery({
+      queryKey: ["doc-blocks", doc.id],
+      queryFn: () => api.docBlocks(doc.id),
+    });
+  };
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -852,6 +864,8 @@ function DocRow({
         setOver(false);
         onDropBefore();
       }}
+      onPointerEnter={prefetchDoc}
+      onFocusCapture={prefetchDoc}
       className={`group relative flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
         active
           ? "bg-white/[0.05] text-text-1"
@@ -1312,8 +1326,11 @@ function RefForm({
   const results = useMemo(() => search.data ?? [], [search.data]);
   const showDropdown =
     open && !selected && debounced.length >= 2 && !search.isFetching;
-  const showLoading =
-    open && !selected && debounced.length >= 2 && search.isFetching;
+  // Only counts as loading once the fetch has run past the flash threshold —
+  // a cached term resolves under it and never shows a placeholder at all.
+  const showLoading = useDelayedFlag(
+    open && !selected && debounced.length >= 2 && search.isFetching,
+  );
 
   useEffect(() => {
     setCursor(0);
@@ -1391,8 +1408,13 @@ function RefForm({
           </button>
         ) : null}
         {showLoading ? (
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-text-disabled">
-            …
+          <div className="absolute left-0 right-0 top-full z-20 mt-1 flex flex-col gap-2 rounded-md border border-border-1 bg-surface-1 p-2 shadow-lg">
+            {[86, 68, 74].map((w) => (
+              <div key={`gs-${w}`} className="flex items-center gap-2">
+                <Skeleton w={22} h={22} className="rounded" />
+                <Skeleton w={`${w}%`} h={10} />
+              </div>
+            ))}
           </div>
         ) : null}
         {showDropdown ? (

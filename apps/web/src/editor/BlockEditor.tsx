@@ -30,6 +30,7 @@ import { generateNKeysBetween } from "@monkyesuite/core";
 import type {
   Block,
   BlockInput,
+  Doc,
   DocBlocks,
   InlineRun,
   TextBlockContent,
@@ -58,6 +59,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError } from "../lib/api";
+import { Skeleton, SkeletonText } from "../components/Skeleton";
 import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
@@ -133,8 +135,15 @@ export function BlockEditor({ docId, projectId, onExit }: Props) {
     queryKey: ["doc-blocks", docId],
     queryFn: () => api.docBlocks(docId),
   });
-  if (q.isPending)
-    return <div className="p-6 text-sm text-text-5">Loading…</div>;
+  // The blocks can't be faked — BlockNote takes `initialContent` once, at
+  // mount — but the chrome can. The sidebar list already holds this doc's
+  // title/icon/cover, so a cold open paints the real header and page frame and
+  // shimmers only the prose. Sidebar rows prefetch on hover, so in practice
+  // this is usually skipped entirely.
+  const cachedDoc = qc
+    .getQueryData<Doc[]>(["docs", projectId])
+    ?.find((d) => d.id === docId);
+  if (q.isPending) return <DocSkeleton doc={cachedDoc} onExit={onExit} />;
   if (q.isError)
     return (
       <div className="p-6 text-sm text-rose-400">
@@ -149,6 +158,75 @@ export function BlockEditor({ docId, projectId, onExit }: Props) {
       onSavedDoc={() => qc.invalidateQueries({ queryKey: ["docs", projectId] })}
       onExit={onExit}
     />
+  );
+}
+
+/* ------------------------------- skeleton --------------------------------- */
+
+// Doc cold-open placeholder. Header, page width, cover slot and title metrics
+// match the real editor exactly, so when blocks land the only thing that
+// changes is the prose — no jump, no re-measure.
+function DocSkeleton({ doc, onExit }: { doc?: Doc; onExit: () => void }) {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div className="flex items-center gap-3 border-b border-border-1 bg-surface-0 px-4 py-2.5">
+        <nav className="flex min-w-0 items-center gap-1 text-xs text-text-disabled">
+          <button
+            type="button"
+            onClick={onExit}
+            className="shrink-0 rounded px-1 hover:text-text-1"
+            title="Back to board"
+          >
+            ← Docs
+          </button>
+          <span className="shrink-0 text-text-5">/</span>
+          {doc?.icon ? (
+            <span className="shrink-0" aria-hidden>
+              {doc.icon}
+            </span>
+          ) : null}
+          {doc ? (
+            <span className="truncate text-text-1">
+              {doc.title || "Untitled"}
+            </span>
+          ) : (
+            <Skeleton w={120} h={11} />
+          )}
+        </nav>
+        <div className="flex-1" />
+        <Skeleton w={78} h={10} />
+      </div>
+
+      <div className="ws-scroll relative flex flex-1 justify-center overflow-y-auto pb-[45vh] pt-8">
+        <div className="w-full max-w-[720px] px-6 md:px-12">
+          {doc?.coverUrl ? (
+            <div className="h-[168px] w-full overflow-hidden rounded-md bg-surface-hover">
+              <img
+                src={doc.coverUrl}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            </div>
+          ) : null}
+          {doc ? (
+            <h1 className="mb-2 mt-6 px-1.5 text-[28px] font-bold tracking-[-0.02em] text-text-1">
+              {doc.title || "Untitled"}
+            </h1>
+          ) : (
+            <Skeleton w="58%" h={30} className="mb-2 mt-6" />
+          )}
+          <div className="mb-6 flex gap-2.5 px-1.5">
+            <Skeleton w={92} h={10} />
+            <Skeleton w={64} h={10} />
+          </div>
+          <div className="flex flex-col gap-7 px-1.5">
+            <SkeletonText lines={4} lineHeight={13} gap={12} />
+            <SkeletonText lines={3} seed={2} lineHeight={13} gap={12} />
+            <SkeletonText lines={5} seed={4} lineHeight={13} gap={12} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

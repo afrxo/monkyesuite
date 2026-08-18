@@ -793,6 +793,7 @@ body::-webkit-scrollbar { display: none; }
   }
 }
 
+.skel,
 .search-skeleton {
   background: linear-gradient(
     90deg,
@@ -802,6 +803,7 @@ body::-webkit-scrollbar { display: none; }
   );
   background-size: 200% 100%;
   animation: search-skeleton-shimmer 1100ms ease-in-out infinite;
+  border-radius: 4px;
 }
 @keyframes search-skeleton-shimmer {
   0% { background-position: 100% 0; }
@@ -815,6 +817,7 @@ body::-webkit-scrollbar { display: none; }
   .fade-in,
   .search-overlay,
   .search-content,
+  .skel,
   .search-skeleton {
     animation: none !important;
     transition: none !important;

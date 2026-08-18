@@ -674,6 +674,17 @@ function Card({
 }) {
   const draggedRef = useRef(false);
   const id = shortTaskId(projectSlug, task.id);
+  const qc = useQueryClient();
+
+  // Warm the card's detail on hover so the modal's comments/attachments/
+  // activity are usually already cached by the time it opens. The board row
+  // seeds the rest of the modal, so a warm hover means zero visible load.
+  const prefetchDetail = () => {
+    qc.prefetchQuery({
+      queryKey: ["card-detail", task.id],
+      queryFn: () => api.cardDetail(task.id),
+    });
+  };
 
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
@@ -706,6 +717,8 @@ function Card({
         onHoverBefore();
       }}
       onDrop={handleDrop}
+      onPointerEnter={prefetchDetail}
+      onFocusCapture={prefetchDetail}
       onClick={(e) => {
         if (draggedRef.current) return;
         const target = e.target as HTMLElement;

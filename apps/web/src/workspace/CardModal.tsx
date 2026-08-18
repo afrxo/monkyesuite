@@ -28,6 +28,7 @@ import {
   useState,
 } from "react";
 import { Icon } from "../components/Icon";
+import { Skeleton, SkeletonText } from "../components/Skeleton";
 import { copyLink } from "../lib/clipboard";
 import { api } from "../lib/api";
 import { toastError } from "../components/Toast";
@@ -72,14 +73,59 @@ type Props = {
   projectSlug: string;
   milestones: Milestone[];
   onClose: () => void;
+  /**
+   * The board's own row for this task. The board already carries title, body,
+   * status, milestone, assignees, tags and due date — everything the header,
+   * meta strip and title/description fields need — so the modal opens fully
+   * formed and only the sub-lists (checklist, attachments, comments, activity)
+   * arrive with the detail fetch.
+   */
+  seed?: Task | null;
 };
 
-export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
+// Board row → a TaskDetail shaped placeholder. The sub-lists are empty because
+// the board genuinely doesn't know them; the sections below render skeletons
+// for exactly those while `detail.isPlaceholderData` holds.
+function seedDetail(task: Task): TaskDetail {
+  return {
+    task,
+    comments: [],
+    checklistItems: [],
+    attachments: [],
+    activity: [],
+    linkedNotes: [],
+  };
+}
+
+export function CardModal({
+  taskId,
+  projectSlug,
+  milestones,
+  onClose,
+  seed = null,
+}: Props) {
   const qc = useQueryClient();
   const detail = useQuery({
     queryKey: ["card-detail", taskId],
     queryFn: () => api.cardDetail(taskId),
+    placeholderData: seed ? seedDetail(seed) : undefined,
   });
+  const hydrating = detail.isPlaceholderData || detail.isPending;
+
+  // Warm the two picker queries the moment the modal mounts, so opening the
+  // assignee or tag popover never lands on "Loading…".
+  const seedProjectId = seed?.projectId ?? detail.data?.task.projectId ?? null;
+  useEffect(() => {
+    if (!seedProjectId) return;
+    qc.prefetchQuery({
+      queryKey: ["members", seedProjectId],
+      queryFn: () => api.members(seedProjectId),
+    });
+    qc.prefetchQuery({
+      queryKey: ["project-tags", seedProjectId],
+      queryFn: () => api.projectTags(seedProjectId),
+    });
+  }, [qc, seedProjectId]);
   const invalidate = useCallback(() => {
     qc.invalidateQueries({ queryKey: ["card-detail", taskId] });
   }, [qc, taskId]);
@@ -215,13 +261,24 @@ export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
             onStatusOpenChange={setStatusOpen}
             onStatusChange={(s) => {
               if (!task || s === task.status) return;
+              // Structural move — paint it immediately in the detail cache so
+              // the header pill flips on click, and roll back on failure. The
+              // board is invalidated on settle rather than patched: it's about
+              // to be re-read anyway when the modal closes.
+              const prev = qc.getQueryData<TaskDetail>(["card-detail", taskId]);
+              qc.setQueryData<TaskDetail>(["card-detail", taskId], (old) =>
+                old ? { ...old, task: { ...old.task, status: s } } : old,
+              );
               api
                 .moveTask(taskId, { status: s })
                 .then(() => {
                   invalidate();
                   if (projectId) invalidateBoard(projectId);
                 })
-                .catch((err) => toastError(err, "Failed to change status."));
+                .catch((err) => {
+                  if (prev) qc.setQueryData(["card-detail", taskId], prev);
+                  toastError(err, "Failed to change status.");
+                });
             }}
             archiveConfirming={archiveConfirming}
             onArchive={armArchive}
@@ -240,28 +297,34 @@ export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
                 <div className="mx-auto max-w-[672px] px-8 pb-10 pt-3">
                   <TitleField task={task} onSaved={invalidate} />
                   <DescriptionField task={task} onSaved={invalidate} />
-                  <ChecklistSection
-                    taskId={taskId}
-                    items={detail.data.checklistItems}
-                    onChanged={invalidate}
-                  />
-                  <AttachmentsSection
-                    taskId={taskId}
-                    attachments={detail.data.attachments}
-                    onOpenViewer={setViewerIndex}
-                    onChanged={invalidate}
-                  />
-                  <ActivityFeed
-                    taskId={taskId}
-                    comments={detail.data.comments}
-                    activity={detail.data.activity}
-                    onChanged={invalidate}
-                    composerRef={composerRef}
-                  />
+                  {hydrating ? (
+                    <CardBodySkeleton />
+                  ) : (
+                    <>
+                      <ChecklistSection
+                        taskId={taskId}
+                        items={detail.data.checklistItems}
+                        onChanged={invalidate}
+                      />
+                      <AttachmentsSection
+                        taskId={taskId}
+                        attachments={detail.data.attachments}
+                        onOpenViewer={setViewerIndex}
+                        onChanged={invalidate}
+                      />
+                      <ActivityFeed
+                        taskId={taskId}
+                        comments={detail.data.comments}
+                        activity={detail.data.activity}
+                        onChanged={invalidate}
+                        composerRef={composerRef}
+                      />
+                    </>
+                  )}
                 </div>
               </>
             ) : (
-              <p className="px-8 py-6 text-xs text-text-disabled">Loading…</p>
+              <CardModalSkeleton />
             )}
           </div>
         </DialogContent>
@@ -471,6 +534,81 @@ function statusDot(s: TaskStatus): string {
     default:
       return "var(--text-disabled)";
   }
+}
+
+/* -------------------------------- skeletons -------------------------------- */
+
+// Popover list placeholder. Both pickers are prefetched on modal open, so this
+// only shows on a genuinely cold popover.
+const PICKER_ROW_WIDTHS = [88, 75, 62, 49, 36];
+
+function PickerRowsSkeleton({ rows }: { rows: number }) {
+  return (
+    <div className="flex flex-col gap-2 px-3 py-2">
+      {PICKER_ROW_WIDTHS.slice(0, rows).map((w) => (
+        <Skeleton key={`pk-${w}`} h={11} w={`${w}%`} />
+      ))}
+    </div>
+  );
+}
+
+
+// Sub-list placeholder: shown under a real, already-populated header + meta
+// strip + title while the detail fetch fills in checklist / attachments /
+// comments. Shapes match the real sections so nothing jumps on swap.
+function CardBodySkeleton() {
+  return (
+    <div className="mt-6 flex flex-col gap-7">
+      <section className="flex flex-col gap-2.5">
+        <Skeleton w={78} h={10} />
+        {[62, 51, 40].map((w) => (
+          <div key={`ck-${w}`} className="flex items-center gap-2">
+            <Skeleton w={13} h={13} className="rounded-[3px]" />
+            <Skeleton w={`${w}%`} h={11} />
+          </div>
+        ))}
+      </section>
+      <section className="flex flex-col gap-2.5">
+        <Skeleton w={92} h={10} />
+        <div className="flex gap-2">
+          {["a", "b"].map((k) => (
+            <Skeleton key={`att-${k}`} w={96} h={64} className="rounded-md" />
+          ))}
+        </div>
+      </section>
+      <section className="flex flex-col gap-3.5">
+        <Skeleton w={64} h={10} />
+        {[0, 1].map((seed) => (
+          <div key={`cm-seed-${seed}`} className="flex gap-2.5">
+            <Skeleton w={20} h={20} round />
+            <div className="flex-1">
+              <Skeleton w={120} h={10} className="mb-2" />
+              <SkeletonText lines={2} seed={seed} lineHeight={11} gap={7} />
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+// Cold open (deep link / hard refresh) — no board row to seed from, so the
+// whole body is shape-only.
+function CardModalSkeleton() {
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3 border-b border-border-1 px-8 py-3">
+        {[70, 58, 44, 62].map((w) => (
+          <Skeleton key={`ms-${w}`} w={w} h={11} />
+        ))}
+      </div>
+      <div className="mx-auto max-w-[672px] px-8 pb-10 pt-3">
+        <Skeleton w="72%" h={22} className="mb-4" />
+        <SkeletonText lines={3} lineHeight={12} />
+        <CardBodySkeleton />
+      </div>
+    </>
+  );
 }
 
 /* -------------------------------- meta strip ------------------------------- */
@@ -1634,9 +1772,7 @@ function AssigneePicker({
         className="w-56 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 py-1 text-text-1 shadow-xl"
       >
         {members.isPending ? (
-          <div className="px-3 py-2 text-[11px] text-text-disabled">
-            Loading…
-          </div>
+          <PickerRowsSkeleton rows={3} />
         ) : (
           members.data?.map((m) => (
             <button
@@ -1783,9 +1919,7 @@ function TagsPicker({
         />
         <div className="max-h-64 overflow-y-auto py-1">
           {vocab.isPending ? (
-            <div className="px-3 py-2 text-[11px] text-text-disabled">
-              Loading…
-            </div>
+            <PickerRowsSkeleton rows={4} />
           ) : matches.length === 0 && !query ? (
             <div className="px-3 py-2 text-[11px] text-text-disabled">
               No tags yet. Type to create one.

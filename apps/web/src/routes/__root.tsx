@@ -150,7 +150,18 @@ function RootComponent() {
   const [queryClient] = useState(
     () =>
       new QueryClient({
-        defaultOptions: { queries: { retry: false } },
+        defaultOptions: {
+          queries: {
+            retry: false,
+            // Perceived speed baseline. With staleTime 0 every remount
+            // refetched and every pane flashed a loading state over data we
+            // already had — remounting a modal or switching panes should
+            // render from cache instantly and revalidate behind the paint.
+            staleTime: 30_000,
+            gcTime: 5 * 60_000,
+            refetchOnWindowFocus: false,
+          },
+        },
       }),
   );
   return (

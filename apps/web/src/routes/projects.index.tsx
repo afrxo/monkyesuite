@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { ScopedError } from "../components/scoped";
+import { Skeleton } from "../components/Skeleton";
 import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 
@@ -18,10 +19,22 @@ const STATUS_COLOR: Record<Project["status"], string> = {
 };
 
 function ProjectsPage() {
+  const qc = useQueryClient();
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.projects(),
   });
+
+  // Hovering a project card warms the three queries the workspace opens with,
+  // so entering it renders the real board instead of the shell skeleton.
+  const prefetchProject = (id: string) => {
+    qc.prefetchQuery({
+      queryKey: ["project", id],
+      queryFn: () => api.project(id),
+    });
+    qc.prefetchQuery({ queryKey: ["board", id], queryFn: () => api.board(id) });
+    qc.prefetchQuery({ queryKey: ["docs", id], queryFn: () => api.docs(id) });
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -32,7 +45,7 @@ function ProjectsPage() {
       {projects.isError ? (
         <ScopedError error={projects.error} />
       ) : projects.isPending ? (
-        <p className="text-sm text-text-5">Loading…</p>
+        <ProjectGridSkeleton />
       ) : (
         <>
           <NewProject />
@@ -47,6 +60,8 @@ function ProjectsPage() {
                   <Link
                     to="/projects/$id"
                     params={{ id: p.id }}
+                    onPointerEnter={() => prefetchProject(p.id)}
+                    onFocus={() => prefetchProject(p.id)}
                     className="block rounded-xl border border-border-1 bg-surface-1/50 p-4 transition hover:border-border-1 hover:bg-surface-1"
                   >
                     <div className="flex items-center justify-between">
@@ -70,6 +85,26 @@ function ProjectsPage() {
         </>
       )}
     </div>
+  );
+}
+
+// Card-shaped placeholder in the same responsive grid as the real list.
+function ProjectGridSkeleton() {
+  return (
+    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {[68, 52, 74, 60, 80, 56].map((w) => (
+        <li
+          key={`pj-${w}`}
+          className="rounded-xl border border-border-1 bg-surface-1/50 p-4"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <Skeleton w={`${w}%`} h={14} />
+            <Skeleton w={44} h={10} />
+          </div>
+          <Skeleton w="42%" h={10} className="mt-3" />
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { ScopedError } from "../components/scoped";
+import { Skeleton } from "../components/Skeleton";
 import { BlockEditor } from "../editor";
 import { api } from "../lib/api";
 import type { BoardViewHandle } from "../workspace/BoardView";
@@ -82,8 +83,10 @@ function WorkspacePage() {
   }, []);
 
   if (project.isError) return <ScopedError error={project.error} />;
-  if (project.isPending || !project.data)
-    return <p className="p-6 text-sm text-text-5">Loading…</p>;
+  // The shell is static — its three-pane grid, topbar height and rail widths
+  // don't depend on the response — so a cold load paints the real layout with
+  // shape placeholders and swaps content in without any reflow.
+  if (project.isPending || !project.data) return <WorkspaceSkeleton />;
 
   const activeDocId = search.doc ?? null;
   const activeMilestone = search.milestone ?? "all";
@@ -102,15 +105,18 @@ function WorkspacePage() {
   // Resolve short id like "SG-010" back to a task uuid by scanning the board
   // that's already loaded. If unresolved, keep the modal closed rather than
   // fetching by short id — the short id isn't unique per project either.
-  const cardTaskId = (() => {
+  // The row itself is kept, not just the id: it seeds the card modal so it
+  // opens with title/status/meta already painted (see CardModal `seed`).
+  const cardTask = (() => {
     if (!activeCard || !board.data) return null;
     for (const lane of board.data.lanes) {
       for (const t of lane.tasks) {
-        if (shortTaskId(project.data.slug, t.id) === activeCard) return t.id;
+        if (shortTaskId(project.data.slug, t.id) === activeCard) return t;
       }
     }
     return null;
   })();
+  const cardTaskId = cardTask?.id ?? null;
 
   const createDoc = async () => {
     const doc = await api.createDoc(id, { title: "Untitled" });
@@ -161,7 +167,7 @@ function WorkspacePage() {
               onExit={() => setDoc(null)}
             />
           ) : board.isPending ? (
-            <p className="p-6 text-sm text-text-5">Loading board…</p>
+            <BoardSkeleton />
           ) : board.isError ? (
             <p className="p-6 text-sm text-rose-400">
               {(board.error as Error)?.message ?? "Failed to load board."}
@@ -197,6 +203,7 @@ function WorkspacePage() {
           taskId={cardTaskId}
           projectSlug={project.data.slug}
           milestones={board.data.milestones}
+          seed={cardTask}
           onClose={() => {
             setCard(null);
             invalidateBoard();
@@ -235,6 +242,88 @@ function WorkspacePage() {
             )}
           </MobileSheet>
         ) : null}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------- skeletons -------------------------------- */
+
+const SKELETON_LANES = [
+  { label: "Backlog", cards: [86, 62, 74] },
+  { label: "To do", cards: [70, 90] },
+  { label: "In progress", cards: [64, 78, 58] },
+  { label: "Review", cards: [72] },
+  { label: "Done", cards: [66, 84] },
+];
+
+// Board pane placeholder — same lane grid, header height and card radius as
+// the real board, so cards land in place rather than pushing the layout.
+function BoardSkeleton() {
+  return (
+    <div className="flex flex-1 gap-3 overflow-hidden p-4">
+      {SKELETON_LANES.map((lane) => (
+        <div
+          key={lane.label}
+          className="flex w-[272px] shrink-0 flex-col gap-2"
+        >
+          <div className="flex items-center gap-2 px-1 py-1">
+            <Skeleton w={9} h={9} round />
+            <Skeleton w={74} h={10} />
+          </div>
+          {lane.cards.map((h) => (
+            <div
+              key={`${lane.label}-${h}`}
+              className="rounded-md border border-border-1 bg-surface-1 p-3"
+            >
+              <Skeleton w={`${h}%`} h={12} />
+              <div className="mt-2.5 flex items-center gap-1.5">
+                <Skeleton w={38} h={9} />
+                <Skeleton w={26} h={9} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Whole-workspace cold load: the grid is the real one, only the contents are
+// shapes. Mirrors the topbar + 260/1fr/360 three-pane layout below.
+function WorkspaceSkeleton() {
+  return (
+    <>
+      <div className="flex h-[42px] items-center gap-3 border-b border-border-1 bg-surface-0 px-4">
+        <Skeleton w={128} h={13} />
+        <Skeleton w={54} h={10} />
+        <div className="flex-1" />
+        <Skeleton w={20} h={20} round />
+        <Skeleton w={20} h={20} round />
+      </div>
+      <div
+        className="grid overflow-hidden bg-surface-0"
+        style={{
+          height: "calc(100vh - 56px)",
+          gridTemplateColumns: "260px 1fr 360px",
+        }}
+      >
+        <div className="hidden flex-col gap-2.5 border-r border-border-1 p-3 md:flex">
+          {[64, 88, 72, 96, 58, 80, 68].map((w) => (
+            <Skeleton key={`sb-${w}`} w={`${w}%`} h={11} />
+          ))}
+        </div>
+        <main className="flex min-h-0 flex-col overflow-hidden bg-[#0c0c0c] col-span-full md:col-span-1">
+          <BoardSkeleton />
+        </main>
+        <div className="hidden flex-col gap-3 border-l border-border-1 p-4 md:flex">
+          {["a", "b", "c", "d"].map((k) => (
+            <div key={`nr-${k}`} className="flex flex-col gap-2">
+              <Skeleton w="52%" h={10} />
+              <Skeleton w="90%" h={11} />
+            </div>
+          ))}
+        </div>
       </div>
     </>
   );

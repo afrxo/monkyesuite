@@ -1,13 +1,3 @@
-import { cn } from "#/lib/utils";
-
-function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="skeleton"
-      className={cn("animate-pulse rounded-md bg-accent", className)}
-      {...props}
-    />
-  );
-}
-
-export { Skeleton };
+// Kept as the shadcn-conventional import path only. The real primitive (and
+// the delay gate that stops skeletons flashing) lives in components/Skeleton.
+export { Skeleton } from "../Skeleton";
