@@ -5,7 +5,6 @@
 // signals). Nothing inside a row is independently interactive (v1).
 
 import type { Task, TaskStatus } from "@monkyesuite/shared";
-import { Icon } from "../../components/Icon";
 import { MiniAvatar } from "../BoardView";
 import { shortTaskId } from "../short-id";
 import { tagChipClass } from "../tag";
@@ -197,9 +196,11 @@ export function ListRow({
         </span>
       </div>
 
-      {/* Title */}
+      {/* Title. The expander is absolutely positioned in the left gutter so the
+          title text sits flush at the column edge on every row (no chevron/
+          spacer indent). Subtasks still indent via paddingLeft. */}
       <div
-        className="flex min-w-0 items-center gap-1.5"
+        className="relative flex min-w-0 items-center"
         style={{ paddingLeft: recessive ? 18 : 0 }}
       >
         {!recessive && hasSubtasks ? (
@@ -213,7 +214,7 @@ export function ListRow({
             }}
             tabIndex={-1}
             aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
-            className="grid h-4 w-4 shrink-0 place-items-center rounded text-text-disabled hover:text-text-1"
+            className="absolute -left-4 top-1/2 grid h-4 w-4 -translate-y-1/2 place-items-center rounded text-text-disabled hover:text-text-1"
           >
             <svg
               width={10}
@@ -228,20 +229,6 @@ export function ListRow({
               <path d="M6 4l4 4-4 4" />
             </svg>
           </button>
-        ) : !recessive ? (
-          <span className="w-4 shrink-0" />
-        ) : null}
-
-        {!recessive ? (
-          // Fixed presence slot: signals a cover exists without rendering it,
-          // so titles stay flush-aligned down the column (a thumbnail here
-          // would jitter the left edge and add browse-noise to a scan list).
-          <span
-            className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-text-disabled"
-            title={task.coverUrl ? "Has cover image" : undefined}
-          >
-            {task.coverUrl ? <Icon name="image" size={12} /> : null}
-          </span>
         ) : null}
 
         <span

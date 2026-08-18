@@ -89,7 +89,15 @@ const MONTH_LABEL = [
   "November",
   "December",
 ];
-const DOW = ["M", "T", "W", "T", "F", "S", "S"];
+const DOW = [
+  { k: "mon", l: "M" },
+  { k: "tue", l: "T" },
+  { k: "wed", l: "W" },
+  { k: "thu", l: "T" },
+  { k: "fri", l: "F" },
+  { k: "sat", l: "S" },
+  { k: "sun", l: "S" },
+];
 
 function Calendar({
   selected,
@@ -166,12 +174,12 @@ function Calendar({
         </div>
       </div>
       <div className="grid grid-cols-7 gap-px pb-1">
-        {DOW.map((d, i) => (
+        {DOW.map((d) => (
           <div
-            key={`${d}-${i}`}
+            key={d.k}
             className="pb-1 text-center font-mono text-[9px] uppercase text-text-disabled"
           >
-            {d}
+            {d.l}
           </div>
         ))}
         {cells.map(({ d, inMonth }) => {

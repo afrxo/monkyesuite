@@ -45,12 +45,14 @@ import {
 import {
   FormattingToolbar,
   FormattingToolbarController,
+  SideMenuController,
   SuggestionMenuController,
   getDefaultReactSlashMenuItems,
   getFormattingToolbarItems,
   useBlockNoteEditor,
   useCreateBlockNote,
 } from "@blocknote/react";
+import { offset as floatingOffset } from "@floating-ui/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -722,7 +724,21 @@ function Editor({
             theme="dark"
             formattingToolbar={false}
             emojiPicker={false}
+            sideMenu={false}
           >
+            {/* Replace BN's default SideMenu with one whose crossAxis offset
+                is zero — BN hard-codes 39px for H1 (and other per-type numbers)
+                to center against its default heading font size, which we've
+                overridden. Zeroing the offset keeps the drag handle aligned
+                with our actual first-line for every block type. */}
+            <SideMenuController
+              floatingUIOptions={{
+                useFloatingOptions: {
+                  placement: "left-start",
+                  middleware: [floatingOffset({ crossAxis: 0 })],
+                },
+              }}
+            />
             <FormattingToolbarController
               formattingToolbar={() => (
                 <FormattingToolbar>
