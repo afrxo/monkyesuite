@@ -710,7 +710,7 @@ function Editor({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Untitled"
-            className="mb-2 w-full bg-transparent text-[28px] font-bold tracking-[-0.02em] text-text-1 outline-none placeholder:text-text-disabled"
+            className="mb-2 -mx-1.5 w-[calc(100%+12px)] rounded-md bg-transparent px-1.5 py-0.5 text-[28px] font-bold tracking-[-0.02em] text-text-1 outline-none transition-colors placeholder:text-text-disabled hover:bg-white/[0.03] focus:bg-white/[0.05]"
           />
           <div className="mb-6 flex gap-2.5 font-mono text-[11px] text-text-disabled">
             <span>edited {relTime(lastSavedAt)}</span>

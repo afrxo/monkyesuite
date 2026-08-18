@@ -11,6 +11,7 @@ import type {
   Doc,
   DocFolder,
   Milestone,
+  PatchMilestoneInput,
   ProjectGame,
   PulseSearchResult,
 } from "@monkyesuite/shared";
@@ -34,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { api } from "../lib/api";
+import { DatePicker } from "./DatePicker";
 import { milestoneColor } from "./milestone-color";
 
 type Props = {
@@ -138,6 +140,7 @@ function ItemWithMenu({
   glyph,
   children,
   count,
+  onEdit,
   onDelete,
 }: {
   active?: boolean;
@@ -145,6 +148,7 @@ function ItemWithMenu({
   glyph: React.ReactNode;
   children: React.ReactNode;
   count?: number | string;
+  onEdit?: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -185,6 +189,14 @@ function ItemWithMenu({
           sideOffset={4}
           className="w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg"
         >
+          {onEdit ? (
+            <DropdownMenuItem
+              onSelect={onEdit}
+              className="block w-full px-3 py-2 text-left text-xs text-text-2 hover:bg-white/[0.05] transition-colors focus:bg-white/[0.05] focus:text-text-1"
+            >
+              Edit
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem
             onSelect={onDelete}
             className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05] transition-colors focus:bg-white/[0.05] focus:text-destructive"
@@ -208,6 +220,7 @@ function MilestoneSection({
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const board = useQuery({
     queryKey: ["board", projectId],
     queryFn: () => api.board(projectId),
@@ -219,6 +232,15 @@ function MilestoneSection({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["board", projectId] });
       setOpen(false);
+    },
+    onError: (err) => toastError(err),
+  });
+  const patch = useMutation({
+    mutationFn: (v: { id: string; input: PatchMilestoneInput }) =>
+      api.patchMilestone(v.id, v.input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["board", projectId] });
+      setEditing(null);
     },
     onError: (err) => toastError(err),
   });
@@ -250,33 +272,50 @@ function MilestoneSection({
       >
         All
       </Item>
-      {milestones.map((m) => (
-        <ItemWithMenu
-          key={m.id}
-          active={active === m.id}
-          onClick={() => onSelect(active === m.id ? "all" : m.id)}
-          glyph={
-            <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${milestoneColor(m.id).dot}`}
-            />
-          }
-          count={countFor(m.id)}
-          onDelete={() => {
-            if (
-              confirm(
-                `Delete milestone “${m.name}”? Cards keep existing but lose their milestone link.`,
+      {milestones.map((m) =>
+        editing === m.id ? (
+          <MilestoneForm
+            key={m.id}
+            initialName={m.name}
+            initialDate={m.targetDate}
+            submitLabel="Save"
+            onSubmit={(name, targetDate) =>
+              patch.mutate({ id: m.id, input: { name, targetDate } })
+            }
+            onCancel={() => setEditing(null)}
+          />
+        ) : (
+          <ItemWithMenu
+            key={m.id}
+            active={active === m.id}
+            onClick={() => onSelect(active === m.id ? "all" : m.id)}
+            glyph={
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full ${milestoneColor(m.id).dot}`}
+              />
+            }
+            count={countFor(m.id)}
+            onEdit={() => {
+              setOpen(false);
+              setEditing(m.id);
+            }}
+            onDelete={() => {
+              if (
+                confirm(
+                  `Delete milestone “${m.name}”? Cards keep existing but lose their milestone link.`,
+                )
               )
-            )
-              del.mutate(m.id);
-          }}
-        >
-          {m.name}
-        </ItemWithMenu>
-      ))}
+                del.mutate(m.id);
+            }}
+          >
+            {m.name}
+          </ItemWithMenu>
+        ),
+      )}
       {open ? (
-        <InlineForm
-          placeholder="Milestone name"
-          onSubmit={(name) => create.mutate({ name })}
+        <MilestoneForm
+          submitLabel="Add"
+          onSubmit={(name, targetDate) => create.mutate({ name, targetDate })}
           onCancel={() => setOpen(false)}
         />
       ) : null}
@@ -1176,6 +1215,69 @@ function InlineForm({
         className="w-full rounded border border-border-1 bg-surface-1 px-2.5 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
       />
     </form>
+  );
+}
+
+// Milestone create/edit form: name + optional target date (same DatePicker as
+// the card panel). Explicit Save/Cancel — the date popover steals focus, so a
+// blur-to-cancel like InlineForm would close the form mid-pick.
+function MilestoneForm({
+  initialName,
+  initialDate,
+  submitLabel,
+  onSubmit,
+  onCancel,
+}: {
+  initialName?: string;
+  initialDate?: string | null;
+  submitLabel: string;
+  onSubmit: (name: string, targetDate: string | null) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initialName ?? "");
+  const [date, setDate] = useState<string | null>(initialDate ?? null);
+  const submit = () => {
+    if (name.trim()) onSubmit(name.trim(), date);
+  };
+  return (
+    <div className="mt-1 space-y-2 rounded border border-border-1 bg-surface-1 px-2 py-2">
+      <input
+        // biome-ignore lint/a11y/noAutofocus: focus what user opened
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            submit();
+          } else if (e.key === "Escape") {
+            onCancel();
+          }
+        }}
+        placeholder="Milestone name"
+        className="w-full rounded border border-border-1 bg-surface-0 px-2.5 py-1.5 text-sm text-text-1 outline-none focus:border-text-5"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <DatePicker value={date} onChange={setDate} title="Target date" />
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded px-2 py-0.5 text-[11px] text-text-3 hover:bg-white/[0.05]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!name.trim()}
+            className="rounded bg-white/[0.06] px-2 py-0.5 text-[11px] text-text-1 hover:bg-white/[0.1] disabled:opacity-40"
+          >
+            {submitLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
