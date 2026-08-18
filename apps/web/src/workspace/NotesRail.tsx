@@ -270,6 +270,11 @@ function NoteItem({
           <Icon name="x" size={11} />
         </button>
       </div>
+      {note.anchorQuote ? (
+        <blockquote className="mb-1 border-l-2 border-accent-warm/60 pl-2 text-[11px] italic text-text-3">
+          “{note.anchorQuote}”
+        </blockquote>
+      ) : null}
       {note.title ? (
         <p className="mb-1 text-sm font-medium leading-[1.35] text-text-1">
           {note.title}

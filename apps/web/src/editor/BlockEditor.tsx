@@ -43,8 +43,12 @@ import {
   type PartialBlock,
 } from "@blocknote/core";
 import {
+  FormattingToolbar,
+  FormattingToolbarController,
   SuggestionMenuController,
   getDefaultReactSlashMenuItems,
+  getFormattingToolbarItems,
+  useBlockNoteEditor,
   useCreateBlockNote,
 } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
@@ -54,6 +58,11 @@ import { ApiError } from "../lib/api";
 import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
+import {
+  calloutBlockSpec,
+  extractRobloxUniverseId,
+  refEmbedBlockSpec,
+} from "./customBlocks";
 import { DocCover } from "./DocCover";
 import { DocIcon } from "./DocIcon";
 import { DocOutline } from "./DocOutline";
@@ -78,6 +87,8 @@ const schema = BlockNoteSchema.create({
     codeBlock: defaultBlockSpecs.codeBlock,
     divider: defaultBlockSpecs.divider,
     image: defaultBlockSpecs.image,
+    callout: calloutBlockSpec(),
+    refEmbed: refEmbedBlockSpec(),
   },
 });
 type Schema = typeof schema;
@@ -96,6 +107,7 @@ const TEXT_TYPES = new Set<Block["type"] | string>([
   "numberedListItem",
   "checkListItem",
   "quote",
+  "callout",
 ]);
 
 // sessionStorage key namespace for the crash-recovery draft mirror. Scoped by
@@ -423,6 +435,41 @@ function Editor({
     return () => window.removeEventListener("keydown", onKey);
   }, [flushNow]);
 
+  // Paste auto-detect: a bare roblox.com/games/:id URL in the clipboard is
+  // upgraded to a refEmbed block. Requires the pasted string to be exactly a
+  // URL (no surrounding text) so pasting a sentence with a link mid-way still
+  // behaves as text.
+  useEffect(() => {
+    const el =
+      typeof document !== "undefined"
+        ? document.querySelector<HTMLElement>(".bn-editor")
+        : null;
+    if (!el) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData("text/plain")?.trim() ?? "";
+      const universeId = extractRobloxUniverseId(text);
+      if (!universeId) return;
+      e.preventDefault();
+      const current = editor.getTextCursorPosition().block;
+      editor.insertBlocks(
+        [
+          {
+            type: "refEmbed",
+            props: { universeId, projectId },
+          } as unknown as PartialBlock<
+            Schema["blockSchema"],
+            Schema["inlineContentSchema"],
+            Schema["styleSchema"]
+          >,
+        ],
+        current,
+        "after",
+      );
+    };
+    el.addEventListener("paste", onPaste);
+    return () => el.removeEventListener("paste", onPaste);
+  }, [editor, projectId]);
+
   // beforeunload guard while there are unsaved edits or an inflight save.
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -606,12 +653,28 @@ function Editor({
             <span>·</span>
             <span>{readingMinutes} min read</span>
           </div>
-          <BlockNoteView editor={editor} theme="dark">
+          <BlockNoteView
+            editor={editor}
+            theme="dark"
+            formattingToolbar={false}
+          >
+            <FormattingToolbarController
+              formattingToolbar={() => (
+                <FormattingToolbar>
+                  {getFormattingToolbarItems()}
+                  <NoteAnchorButton projectId={projectId} docId={doc.id} />
+                </FormattingToolbar>
+              )}
+            />
             <SuggestionMenuController
               triggerCharacter="/"
               getItems={async (query) =>
                 filterSuggestionItems(
-                  getDefaultReactSlashMenuItems(editor),
+                  [
+                    ...getDefaultReactSlashMenuItems(editor),
+                    ...calloutSlashItems(editor),
+                    refEmbedSlashItem(editor, projectId),
+                  ],
                   query,
                 )
               }
@@ -713,16 +776,19 @@ function blocksToBlockNote(
         base.content = text
           ? [{ type: "text", text, styles: {} }]
           : [];
-      } else if (b.type === "divider") {
-        base.content = [];
-      } else if (b.type === "image") {
+      } else if (b.type === "divider" || b.type === "image" || b.type === "refEmbed") {
         base.content = [];
       }
       if (b.type === "heading") {
         base.props = { level: (b.props.level as 1 | 2 | 3) ?? 1 };
       } else if (b.type === "checkListItem") {
         base.props = { checked: Boolean(b.props.checked) };
-      } else if (b.type === "codeBlock" || b.type === "image") {
+      } else if (
+        b.type === "codeBlock" ||
+        b.type === "image" ||
+        b.type === "callout" ||
+        b.type === "refEmbed"
+      ) {
         base.props = { ...(b.props as Record<string, unknown>) };
       }
       if (children.length) base.children = children;
@@ -759,9 +825,11 @@ function blockNoteToBlocks(
         const inline = n.content as unknown as { text?: string }[] | undefined;
         const text = inline?.[0]?.text ?? "";
         content = { text };
-      } else if (type === "divider") {
-        content = {};
-      } else if (type === "image") {
+      } else if (
+        type === "divider" ||
+        type === "image" ||
+        type === "refEmbed"
+      ) {
         content = {};
       } else {
         content = {};
@@ -795,6 +863,115 @@ function blockNoteToBlocks(
   };
   walk(tree, null);
   return out;
+}
+
+/* ------------------------- anchored-note toolbar btn ---------------------- */
+
+function NoteAnchorButton({
+  projectId,
+  docId,
+}: {
+  projectId: string;
+  docId: string;
+}) {
+  const qc = useQueryClient();
+  const editor = useBlockNoteEditor();
+  return (
+    <button
+      type="button"
+      title="Anchor a note to this selection"
+      onClick={async () => {
+        const quote = editor.getSelectedText().trim();
+        if (!quote) return;
+        // Take the first block that contains the selection anchor; nested
+        // selections spanning multiple blocks anchor to the top one.
+        const block = editor.getTextCursorPosition().block;
+        const body = window.prompt(`Note about "${quote.slice(0, 60)}":`);
+        if (!body?.trim()) return;
+        try {
+          await api.createProjectNote(projectId, {
+            body: body.trim(),
+            docId,
+            blockId: block.id,
+            anchorQuote: quote.slice(0, 500),
+          });
+          qc.invalidateQueries({ queryKey: ["project-notes", projectId] });
+        } catch (err) {
+          toastError(err, "Failed to create anchored note.");
+        }
+      }}
+      style={{
+        padding: "4px 8px",
+        fontSize: 12,
+        color: "var(--text-2)",
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+      }}
+    >
+      💬 Note
+    </button>
+  );
+}
+
+/* ------------------------------ slash + paste ----------------------------- */
+
+// The editor's actual runtime type — pulled from a call rather than
+// ReturnType<>, since useCreateBlockNote is a generic React hook.
+type BNEditor = ReturnType<typeof useCreateBlockNote>;
+
+function calloutSlashItems(editor: BNEditor) {
+  const insert = (variant: "note" | "tip" | "warning" | "danger") => ({
+    title: `${variant[0]?.toUpperCase()}${variant.slice(1)} callout`,
+    group: "Callouts",
+    onItemClick: () => {
+      const current = editor.getTextCursorPosition().block;
+      editor.insertBlocks(
+        [
+          {
+            type: "callout",
+            props: { variant },
+            content: [],
+          } as unknown as PartialBlock<
+            Schema["blockSchema"],
+            Schema["inlineContentSchema"],
+            Schema["styleSchema"]
+          >,
+        ],
+        current,
+        "after",
+      );
+    },
+  });
+  return [insert("note"), insert("tip"), insert("warning"), insert("danger")];
+}
+
+function refEmbedSlashItem(editor: BNEditor, projectId: string) {
+  return {
+    title: "Ref embed",
+    group: "Other",
+    subtext: "Insert a linked project game as a card",
+    onItemClick: () => {
+      const input = window.prompt("Paste the roblox.com/games/ URL:") ?? "";
+      const universeId = extractRobloxUniverseId(input);
+      if (!universeId) return;
+      const current = editor.getTextCursorPosition().block;
+      editor.insertBlocks(
+        [
+          {
+            type: "refEmbed",
+            props: { universeId, projectId },
+          } as unknown as PartialBlock<
+            Schema["blockSchema"],
+            Schema["inlineContentSchema"],
+            Schema["styleSchema"]
+          >,
+        ],
+        current,
+        "after",
+      );
+    },
+  };
 }
 
 function blockChanged(prev: Block, next: BlockInput): boolean {

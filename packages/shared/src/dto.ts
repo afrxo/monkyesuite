@@ -459,7 +459,9 @@ export type BlockType =
   | "quote"
   | "codeBlock"
   | "divider"
-  | "image";
+  | "image"
+  | "callout"
+  | "refEmbed";
 
 // The DB envelope. `content` and `props` shapes vary by type; text-bearing
 // blocks store `{ runs }`, code stores `{ text }`, image/divider carry only

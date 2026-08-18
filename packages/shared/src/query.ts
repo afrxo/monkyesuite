@@ -377,6 +377,33 @@ export const blockInputSchema = z.discriminatedUnion("type", [
     content: emptyContent,
     props: imageProps,
   }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("callout"),
+    content: textContentSchema,
+    props: z
+      .object({
+        variant: z.enum(["note", "tip", "warning", "danger"]),
+      })
+      .catchall(z.unknown()),
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("refEmbed"),
+    content: emptyContent,
+    props: z
+      .object({
+        universeId: z.number().int().positive(),
+        projectId: z.string().uuid(),
+      })
+      .catchall(z.unknown()),
+  }),
 ]);
 export type BlockInput = z.infer<typeof blockInputSchema>;
 
