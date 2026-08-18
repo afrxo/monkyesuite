@@ -5,6 +5,7 @@
 // signals). Nothing inside a row is independently interactive (v1).
 
 import type { Task, TaskStatus } from "@monkyesuite/shared";
+import { Icon } from "../../components/Icon";
 import { MiniAvatar } from "../BoardView";
 import { shortTaskId } from "../short-id";
 import { tagChipClass } from "../tag";
@@ -231,12 +232,16 @@ export function ListRow({
           <span className="w-4 shrink-0" />
         ) : null}
 
-        {!recessive && task.coverUrl ? (
-          <img
-            src={task.coverUrl}
-            alt=""
-            className="h-6 w-6 shrink-0 rounded object-cover"
-          />
+        {!recessive ? (
+          // Fixed presence slot: signals a cover exists without rendering it,
+          // so titles stay flush-aligned down the column (a thumbnail here
+          // would jitter the left edge and add browse-noise to a scan list).
+          <span
+            className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-text-disabled"
+            title={task.coverUrl ? "Has cover image" : undefined}
+          >
+            {task.coverUrl ? <Icon name="image" size={12} /> : null}
+          </span>
         ) : null}
 
         <span
