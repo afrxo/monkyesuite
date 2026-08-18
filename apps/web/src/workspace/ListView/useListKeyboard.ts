@@ -21,7 +21,12 @@ type Args = {
   onExpand: (taskId: string, next: boolean) => void;
 };
 
-export function useListKeyboard({ rows, openCardTaskId, onOpen, onExpand }: Args) {
+export function useListKeyboard({
+  rows,
+  openCardTaskId,
+  onOpen,
+  onExpand,
+}: Args) {
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const elems = useRef(new Map<string, HTMLElement>());
   const rememberedKey = useRef<string | null>(null);
@@ -41,9 +46,7 @@ export function useListKeyboard({ rows, openCardTaskId, onOpen, onExpand }: Args
   const move = useCallback(
     (delta: 1 | -1) => {
       if (rows.length === 0) return;
-      const idx = focusedKey
-        ? rows.findIndex((r) => r.key === focusedKey)
-        : -1;
+      const idx = focusedKey ? rows.findIndex((r) => r.key === focusedKey) : -1;
       const next =
         idx === -1
           ? delta === 1

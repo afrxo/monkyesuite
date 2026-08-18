@@ -32,9 +32,11 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { api } from "../lib/api";
+import { ListView } from "./ListView/ListView";
 import { milestoneColor } from "./milestone-color";
 import { shortTaskId } from "./short-id";
 import { tagChipClass } from "./tag";
+import { matchesTaskFilter } from "./taskFilter";
 
 const VISIBLE_LANES: TaskStatus[] = [
   "backlog",
@@ -67,6 +69,9 @@ type Props = {
   milestoneFilter: MilestoneFilter;
   onChanged: () => void;
   onOpenCard?: (taskId: string) => void;
+  // Which card the URL currently has open (null when the modal is closed). Only
+  // List needs it — to restore row focus when the modal closes.
+  openCardTaskId?: string | null;
 };
 
 // --- optimistic helpers ---
@@ -126,7 +131,15 @@ function optimisticallyReorderTask(
 }
 
 export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
-  { projectId, projectSlug, board, milestoneFilter, onChanged, onOpenCard },
+  {
+    projectId,
+    projectSlug,
+    board,
+    milestoneFilter,
+    onChanged,
+    onOpenCard,
+    openCardTaskId = null,
+  },
   ref,
 ) {
   const qc = useQueryClient();
@@ -209,8 +222,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
       return { snapshot };
     },
     onError: (err, _v, ctx) => {
-      if (ctx?.snapshot)
-        qc.setQueryData(["board", projectId], ctx.snapshot);
+      if (ctx?.snapshot) qc.setQueryData(["board", projectId], ctx.snapshot);
       toastError(err, "Failed to move card.");
     },
     onSettled: onChanged,
@@ -231,8 +243,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
       return { snapshot };
     },
     onError: (err, _v, ctx) => {
-      if (ctx?.snapshot)
-        qc.setQueryData(["board", projectId], ctx.snapshot);
+      if (ctx?.snapshot) qc.setQueryData(["board", projectId], ctx.snapshot);
       toastError(err, "Failed to reorder card.");
     },
     onSettled: onChanged,
@@ -257,25 +268,9 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
     clearDrag();
   }
 
-  const q = query.trim().toLowerCase();
-  const matches = (t: Task): boolean => {
-    if (milestoneFilter !== "all" && t.milestoneId !== milestoneFilter)
-      return false;
-    // AND semantics: a card matches only if it carries every selected tag.
-    if (tagFilter.size > 0) {
-      const taskTagIds = new Set((t.tags ?? []).map((tag) => tag.id));
-      for (const wanted of tagFilter) {
-        if (!taskTagIds.has(wanted)) return false;
-      }
-    }
-    if (!q) return true;
-    const id = shortTaskId(projectSlug, t.id).toLowerCase();
-    return (
-      t.title.toLowerCase().includes(q) ||
-      (t.body ?? "").toLowerCase().includes(q) ||
-      id.includes(q)
-    );
-  };
+  // Shared with List so a card visible in one view is visible in the other.
+  const matches = (t: Task): boolean =>
+    matchesTaskFilter(t, { milestoneFilter, tagFilter, query }, projectSlug);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -284,12 +279,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
           <ViewTab active={view === "board"} onClick={() => setView("board")}>
             Board
           </ViewTab>
-          <ViewTab
-            disabled
-            title="coming soon"
-            active={false}
-            onClick={() => {}}
-          >
+          <ViewTab active={view === "list"} onClick={() => setView("list")}>
             List
           </ViewTab>
           <ViewTab
@@ -318,7 +308,11 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
           </span>
         </button>
         <label className="hidden w-60 items-center gap-2 rounded border border-border-1 bg-surface-1 px-2.5 py-1.5 text-xs text-text-3 sm:flex">
-          <Icon name="search" size={14} className="shrink-0 text-text-disabled" />
+          <Icon
+            name="search"
+            size={14}
+            className="shrink-0 text-text-disabled"
+          />
           <input
             ref={searchRef}
             value={query}
@@ -350,7 +344,9 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
                 className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] transition-opacity ${tagChipClass(tag)} ${
                   on ? "" : "opacity-60 hover:opacity-100"
                 }`}
-                title={on ? `Remove filter: ${tag.name}` : `Filter: ${tag.name}`}
+                title={
+                  on ? `Remove filter: ${tag.name}` : `Filter: ${tag.name}`
+                }
               >
                 {tag.name}
                 <span className="ml-1 font-mono text-[9px] opacity-70">
@@ -371,92 +367,112 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
         </div>
       ) : null}
 
-      <div
-        className="grid flex-1 min-h-0 gap-px overflow-hidden bg-border-1"
-        style={{
-          gridTemplateColumns: `repeat(${lanes.length}, minmax(0, 1fr))`,
-        }}
-      >
-        {lanes.map((status) => {
-          const all = laneTasks(status);
-          const shown = all.filter(matches);
-          return (
-            <Lane
-              key={status}
-              status={status}
-              count={shown.length}
-              onAdd={() => setAddingIn(status)}
-              onDropEnd={() => drop(status, null)}
-              onHoverEnd={() => hoverBefore(status, null)}
-              isEndTarget={
-                !!drag &&
-                dropTarget?.status === status &&
-                dropTarget.beforeId === null
-              }
-              dragging={!!drag}
-              dragHeight={dragHeight}
-              footer={
-                <NewTask
-                  projectId={projectId}
-                  status={status}
-                  milestoneId={
-                    milestoneFilter === "all" ? null : milestoneFilter
-                  }
-                  editing={addingIn === status}
-                  onOpen={() => setAddingIn(status)}
-                  onClose={() => setAddingIn(null)}
-                  onChanged={onChanged}
-                />
-              }
-            >
-              {shown.map((task) => (
-                <Fragment key={task.id}>
-                  <DropSlot
-                    active={
-                      !!drag &&
-                      dropTarget?.status === status &&
-                      dropTarget.beforeId === task.id &&
-                      drag.taskId !== task.id
-                    }
-                    visible={!!drag}
-                    ghostHeight={dragHeight}
-                    onHover={() => hoverBefore(status, task.id)}
-                    onDrop={() => drop(status, task.id)}
-                  />
-                  <Card
-                    task={task}
+      {view === "list" ? (
+        <ListView
+          board={board}
+          projectId={projectId}
+          projectSlug={projectSlug}
+          milestoneFilter={milestoneFilter}
+          tagFilter={tagFilter}
+          query={query}
+          showArchived={showArchived}
+          openCardTaskId={openCardTaskId}
+          onOpenCard={(taskId) => onOpenCard?.(taskId)}
+          onClearFilters={() => {
+            setTagFilter(new Set());
+            setQuery("");
+          }}
+        />
+      ) : (
+        <div
+          className="grid flex-1 min-h-0 gap-px overflow-hidden bg-border-1"
+          style={{
+            gridTemplateColumns: `repeat(${lanes.length}, minmax(0, 1fr))`,
+          }}
+        >
+          {lanes.map((status) => {
+            const all = laneTasks(status);
+            const shown = all.filter(matches);
+            return (
+              <Lane
+                key={status}
+                status={status}
+                count={shown.length}
+                onAdd={() => setAddingIn(status)}
+                onDropEnd={() => drop(status, null)}
+                onHoverEnd={() => hoverBefore(status, null)}
+                isEndTarget={
+                  !!drag &&
+                  dropTarget?.status === status &&
+                  dropTarget.beforeId === null
+                }
+                dragging={!!drag}
+                dragHeight={dragHeight}
+                footer={
+                  <NewTask
                     projectId={projectId}
-                    projectSlug={projectSlug}
-                    milestoneName={
-                      milestoneFilter === "all" && task.milestoneId
-                        ? (board.milestones.find(
-                            (m) => m.id === task.milestoneId,
-                          )?.name ?? null)
-                        : null
+                    status={status}
+                    milestoneId={
+                      milestoneFilter === "all" ? null : milestoneFilter
                     }
-                    onDragStart={(h) => {
-                      setDrag({ taskId: task.id, from: status });
-                      setDragHeight(h);
-                    }}
-                    onDragCancel={clearDrag}
-                    onDropBefore={() => drop(status, task.id)}
-                    onHoverBefore={() => hoverBefore(status, task.id)}
-                    isDropTarget={
-                      !!drag &&
-                      dropTarget?.status === status &&
-                      dropTarget.beforeId === task.id &&
-                      drag.taskId !== task.id
-                    }
-                    isDragging={drag?.taskId === task.id}
+                    editing={addingIn === status}
+                    onOpen={() => setAddingIn(status)}
+                    onClose={() => setAddingIn(null)}
                     onChanged={onChanged}
-                    onOpen={onOpenCard ? () => onOpenCard(task.id) : undefined}
                   />
-                </Fragment>
-              ))}
-            </Lane>
-          );
-        })}
-      </div>
+                }
+              >
+                {shown.map((task) => (
+                  <Fragment key={task.id}>
+                    <DropSlot
+                      active={
+                        !!drag &&
+                        dropTarget?.status === status &&
+                        dropTarget.beforeId === task.id &&
+                        drag.taskId !== task.id
+                      }
+                      visible={!!drag}
+                      ghostHeight={dragHeight}
+                      onHover={() => hoverBefore(status, task.id)}
+                      onDrop={() => drop(status, task.id)}
+                    />
+                    <Card
+                      task={task}
+                      projectId={projectId}
+                      projectSlug={projectSlug}
+                      milestoneName={
+                        milestoneFilter === "all" && task.milestoneId
+                          ? (board.milestones.find(
+                              (m) => m.id === task.milestoneId,
+                            )?.name ?? null)
+                          : null
+                      }
+                      onDragStart={(h) => {
+                        setDrag({ taskId: task.id, from: status });
+                        setDragHeight(h);
+                      }}
+                      onDragCancel={clearDrag}
+                      onDropBefore={() => drop(status, task.id)}
+                      onHoverBefore={() => hoverBefore(status, task.id)}
+                      isDropTarget={
+                        !!drag &&
+                        dropTarget?.status === status &&
+                        dropTarget.beforeId === task.id &&
+                        drag.taskId !== task.id
+                      }
+                      isDragging={drag?.taskId === task.id}
+                      onChanged={onChanged}
+                      onOpen={
+                        onOpenCard ? () => onOpenCard(task.id) : undefined
+                      }
+                    />
+                  </Fragment>
+                ))}
+              </Lane>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 });
@@ -709,41 +725,41 @@ function Card({
         </div>
       ) : null}
       <div className="p-3">
-      {milestoneName && task.milestoneId ? (
-        <div
-          className="mb-1.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-text-disabled"
-          title={`Milestone: ${milestoneName}`}
-        >
-          <span
-            className={`inline-block h-1.5 w-1.5 rounded-full ${milestoneColor(task.milestoneId).dot}`}
-          />
-          <span className="truncate">{milestoneName}</span>
-        </div>
-      ) : null}
-      <div className="mb-2 pr-5 text-text-1">{task.title}</div>
-      <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-text-disabled">
-        {(task.tags ?? []).map((tag) => (
-          <span
-            key={tag.id}
-            className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
+        {milestoneName && task.milestoneId ? (
+          <div
+            className="mb-1.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-text-disabled"
+            title={`Milestone: ${milestoneName}`}
           >
-            {tag.name}
-          </span>
-        ))}
-        {(task.assignees ?? []).length > 0 ? (
-          <span className="ml-auto flex -space-x-1">
-            {(task.assignees ?? []).slice(0, 3).map((a) => (
-              <MiniAvatar key={a.id} name={a.name ?? a.email} />
-            ))}
-            {(task.assignees ?? []).length > 3 ? (
-              <span className="grid h-5 w-5 place-items-center rounded-full border-[1.5px] border-surface-0 bg-surface-hover text-[9px] font-semibold text-text-3">
-                +{(task.assignees ?? []).length - 3}
-              </span>
-            ) : null}
-          </span>
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${milestoneColor(task.milestoneId).dot}`}
+            />
+            <span className="truncate">{milestoneName}</span>
+          </div>
         ) : null}
-      </div>
-      <CardMenu task={task} projectId={projectId} onChanged={onChanged} />
+        <div className="mb-2 pr-5 text-text-1">{task.title}</div>
+        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-text-disabled">
+          {(task.tags ?? []).map((tag) => (
+            <span
+              key={tag.id}
+              className={`rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
+            >
+              {tag.name}
+            </span>
+          ))}
+          {(task.assignees ?? []).length > 0 ? (
+            <span className="ml-auto flex -space-x-1">
+              {(task.assignees ?? []).slice(0, 3).map((a) => (
+                <MiniAvatar key={a.id} name={a.name ?? a.email} />
+              ))}
+              {(task.assignees ?? []).length > 3 ? (
+                <span className="grid h-5 w-5 place-items-center rounded-full border-[1.5px] border-surface-0 bg-surface-hover text-[9px] font-semibold text-text-3">
+                  +{(task.assignees ?? []).length - 3}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+        <CardMenu task={task} projectId={projectId} onChanged={onChanged} />
       </div>
     </div>
   );

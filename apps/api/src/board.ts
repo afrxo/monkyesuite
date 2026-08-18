@@ -25,9 +25,9 @@ import {
   createTaskSchema,
   type Milestone,
   moveTaskSchema,
+  type ProjectTag,
   patchMilestoneSchema,
   patchTaskSchema,
-  type ProjectTag,
   reorderTaskSchema,
   TASK_STATUSES,
   type Task,
@@ -40,9 +40,9 @@ import { Hono } from "hono";
 import { resolveItemAccess, resolveProjectAccess } from "./access.js";
 import { logActivity } from "./cards.js";
 import { notFound, validationError } from "./errors.js";
-import { coverUrlFor } from "./r2.js";
 import { toDisplayUsername } from "./identity.js";
 import { type AppEnv, requireUser } from "./middleware.js";
+import { coverUrlFor } from "./r2.js";
 import { iso, isoReq } from "./serialize.js";
 import { type Tx, withUser } from "./tx.js";
 
@@ -364,7 +364,10 @@ export function boardRoutes(): Hono<AppEnv> {
         .select(taskSelect)
         .from(tasks)
         .leftJoin(games, eq(games.universeId, tasks.universeId))
-        .leftJoin(taskAttachments, eq(taskAttachments.id, tasks.coverAttachmentId))
+        .leftJoin(
+          taskAttachments,
+          eq(taskAttachments.id, tasks.coverAttachmentId),
+        )
         .where(eq(tasks.projectId, id))
         .orderBy(asc(tasks.orderKey));
 
@@ -517,7 +520,13 @@ export function boardRoutes(): Hono<AppEnv> {
         .returning({ id: tasks.id });
       if (!row) throw notFound("Subtask creation failed.");
       if (body.data.assigneeIds?.length) {
-        await setAssignees(tx, row.id, projectId, userId, body.data.assigneeIds);
+        await setAssignees(
+          tx,
+          row.id,
+          projectId,
+          userId,
+          body.data.assigneeIds,
+        );
       }
       const join = await taskJoinById(tx, row.id);
       if (!join) throw notFound("Subtask creation failed.");
@@ -566,7 +575,13 @@ export function boardRoutes(): Hono<AppEnv> {
         })
         .where(eq(tasks.id, id));
       if (d.assigneeIds !== undefined) {
-        const diff = await setAssignees(tx, id, projectId, userId, d.assigneeIds);
+        const diff = await setAssignees(
+          tx,
+          id,
+          projectId,
+          userId,
+          d.assigneeIds,
+        );
         if (diff.added.length > 0 || diff.removed.length > 0) {
           await logActivity(tx, {
             taskId: id,
@@ -592,7 +607,12 @@ export function boardRoutes(): Hono<AppEnv> {
       if (!join) throw notFound("No such task.");
       // Return the parent's subtasks too, so an edited parent re-renders whole.
       const kids = await subtasksOf(tx, id);
-      return mapTask(join, kids, await tagsOf(tx, id), await assigneesOf(tx, id));
+      return mapTask(
+        join,
+        kids,
+        await tagsOf(tx, id),
+        await assigneesOf(tx, id),
+      );
     });
     return c.json(task);
   });
@@ -631,7 +651,12 @@ export function boardRoutes(): Hono<AppEnv> {
       }
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");
-      return mapTask(join, await subtasksOf(tx, id), await tagsOf(tx, id), await assigneesOf(tx, id));
+      return mapTask(
+        join,
+        await subtasksOf(tx, id),
+        await tagsOf(tx, id),
+        await assigneesOf(tx, id),
+      );
     });
     return c.json(task);
   });
@@ -662,7 +687,12 @@ export function boardRoutes(): Hono<AppEnv> {
         .where(eq(tasks.id, id));
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");
-      return mapTask(join, await subtasksOf(tx, id), await tagsOf(tx, id), await assigneesOf(tx, id));
+      return mapTask(
+        join,
+        await subtasksOf(tx, id),
+        await tagsOf(tx, id),
+        await assigneesOf(tx, id),
+      );
     });
     return c.json(task);
   });
@@ -805,4 +835,3 @@ async function subtasksOf(tx: Tx, parentId: string): Promise<Task[]> {
 async function tagsOf(tx: Tx, taskId: string): Promise<ProjectTag[]> {
   return (await tagsByTask(tx, [taskId])).get(taskId) ?? [];
 }
-

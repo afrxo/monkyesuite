@@ -6,14 +6,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { ScopedError } from "../components/scoped";
+import { BlockEditor } from "../editor";
 import { api } from "../lib/api";
 import type { BoardViewHandle } from "../workspace/BoardView";
 import { BoardView } from "../workspace/BoardView";
 import { CardModal } from "../workspace/CardModal";
-import { BlockEditor } from "../editor";
 import { NotesRail } from "../workspace/NotesRail";
-import { shortTaskId } from "../workspace/short-id";
 import { Sidebar } from "../workspace/Sidebar";
+import { shortTaskId } from "../workspace/short-id";
 import { Topbar } from "../workspace/Topbar";
 
 type Search = { doc?: string; milestone?: string; card?: string };
@@ -150,44 +150,46 @@ function WorkspacePage() {
         </div>
 
         <main className="flex min-h-0 flex-col overflow-hidden bg-[#0c0c0c] col-span-full md:col-span-1">
-        <MobileBar
-          onOpenLeft={() => setMobileSheet("left")}
-          onOpenRight={() => setMobileSheet("right")}
-        />
-        {activeDocId ? (
-          <BlockEditor
-            docId={activeDocId}
-            projectId={id}
-            onExit={() => setDoc(null)}
+          <MobileBar
+            onOpenLeft={() => setMobileSheet("left")}
+            onOpenRight={() => setMobileSheet("right")}
           />
-        ) : board.isPending ? (
-          <p className="p-6 text-sm text-text-5">Loading board…</p>
-        ) : board.isError ? (
-          <p className="p-6 text-sm text-rose-400">{(board.error as Error)?.message ?? "Failed to load board."}</p>
-        ) : board.data ? (
-          <BoardView
-            ref={boardRef}
+          {activeDocId ? (
+            <BlockEditor
+              docId={activeDocId}
+              projectId={id}
+              onExit={() => setDoc(null)}
+            />
+          ) : board.isPending ? (
+            <p className="p-6 text-sm text-text-5">Loading board…</p>
+          ) : board.isError ? (
+            <p className="p-6 text-sm text-rose-400">
+              {(board.error as Error)?.message ?? "Failed to load board."}
+            </p>
+          ) : board.data ? (
+            <BoardView
+              ref={boardRef}
+              projectId={id}
+              projectSlug={project.data.slug}
+              board={board.data}
+              milestoneFilter={activeMilestone}
+              openCardTaskId={cardTaskId}
+              onChanged={invalidateBoard}
+              onOpenCard={(taskId) =>
+                setCard(shortTaskId(project.data.slug, taskId))
+              }
+            />
+          ) : null}
+        </main>
+
+        {/* Right rail — desktop */}
+        <div className="hidden md:contents">
+          <NotesRail
             projectId={id}
             projectSlug={project.data.slug}
-            board={board.data}
-            milestoneFilter={activeMilestone}
-            onChanged={invalidateBoard}
-            onOpenCard={(taskId) =>
-              setCard(shortTaskId(project.data.slug, taskId))
-            }
+            onOpenCard={() => setDoc(null)}
           />
-        ) : null}
-      </main>
-
-      {/* Right rail — desktop */}
-      <div className="hidden md:contents">
-        <NotesRail
-          projectId={id}
-          projectSlug={project.data.slug}
-          onOpenCard={() => setDoc(null)}
-        />
-      </div>
-
+        </div>
       </div>
 
       {cardTaskId && board.data ? (
@@ -203,36 +205,36 @@ function WorkspacePage() {
       ) : null}
 
       <div>
-      {/* Mobile slide-over sheets */}
-      {mobileSheet ? (
-        <MobileSheet side={mobileSheet} onClose={() => setMobileSheet(null)}>
-          {mobileSheet === "left" ? (
-            <Sidebar
-              projectId={id}
-              activeDocId={activeDocId}
-              activeMilestone={activeMilestone}
-              onSelectDoc={(v) => {
-                setDoc(v);
-                setMobileSheet(null);
-              }}
-              onSelectMilestone={(m) => {
-                setMilestone(m);
-                setMobileSheet(null);
-              }}
-              onCreateDoc={async () => {
-                await createDoc();
-                setMobileSheet(null);
-              }}
-            />
-          ) : (
-            <NotesRail
-          projectId={id}
-          projectSlug={project.data.slug}
-          onOpenCard={() => setDoc(null)}
-        />
-          )}
-        </MobileSheet>
-      ) : null}
+        {/* Mobile slide-over sheets */}
+        {mobileSheet ? (
+          <MobileSheet side={mobileSheet} onClose={() => setMobileSheet(null)}>
+            {mobileSheet === "left" ? (
+              <Sidebar
+                projectId={id}
+                activeDocId={activeDocId}
+                activeMilestone={activeMilestone}
+                onSelectDoc={(v) => {
+                  setDoc(v);
+                  setMobileSheet(null);
+                }}
+                onSelectMilestone={(m) => {
+                  setMilestone(m);
+                  setMobileSheet(null);
+                }}
+                onCreateDoc={async () => {
+                  await createDoc();
+                  setMobileSheet(null);
+                }}
+              />
+            ) : (
+              <NotesRail
+                projectId={id}
+                projectSlug={project.data.slug}
+                onOpenCard={() => setDoc(null)}
+              />
+            )}
+          </MobileSheet>
+        ) : null}
       </div>
     </>
   );

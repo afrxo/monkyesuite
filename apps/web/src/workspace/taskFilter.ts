@@ -42,8 +42,6 @@ export function matchesTaskFilter(
 // visible because an empty milestone is itself triage signal.
 export function isFilterActive(f: TaskFilter): boolean {
   return (
-    f.milestoneFilter !== "all" ||
-    f.tagFilter.size > 0 ||
-    f.query.trim() !== ""
+    f.milestoneFilter !== "all" || f.tagFilter.size > 0 || f.query.trim() !== ""
   );
 }

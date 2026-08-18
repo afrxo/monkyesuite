@@ -33,8 +33,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 const DAY = 86_400_000;
 
 function DateCell({ dueAt, done }: { dueAt: string | null; done: boolean }) {
-  if (!dueAt)
-    return <span className="text-[11px] text-text-disabled">—</span>;
+  if (!dueAt) return <span className="text-[11px] text-text-disabled">—</span>;
   const t = Date.parse(dueAt);
   const now = Date.now();
   const overdue = !done && t < now;
@@ -83,7 +82,12 @@ const G_CHECK = "M3 8.5 6.5 12 13 4";
 const G_COMMENT = "M2 4h12v8H6l-3 2v-2H2z";
 const G_ATTACH = "M12 6.5 7.5 11a2 2 0 0 1-3-3l5-5a3 3 0 0 1 4 4l-5 5";
 
-type Signal = { key: string; glyph: React.ReactNode; text: string; title: string };
+type Signal = {
+  key: string;
+  glyph: React.ReactNode;
+  text: string;
+  title: string;
+};
 
 function signalsOf(task: Task, recessive: boolean): Signal[] {
   const out: Signal[] = [];

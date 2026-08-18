@@ -24,6 +24,48 @@
 .bn-editor .bn-block-content h1 { font-size: 24px; margin-block: 24px 8px; }
 .bn-editor .bn-block-content h2 { font-size: 19px; margin-block: 20px 6px; }
 .bn-editor .bn-block-content h3 { font-size: 16px; margin-block: 16px 4px; }
+/* Kill top margin on the very first block so an opening heading doesn't sit
+   half a line lower than expected. */
+.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h1,
+.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h2,
+.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h3,
+.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content p {
+  margin-top: 0 !important;
+}
+
+/*
+ * Notion-style faint dotted outline on the block under the cursor + on hover.
+ * Signals editability without competing with the text.
+ */
+.bn-editor .bn-block-content {
+  border-radius: 4px;
+  transition: outline-color 120ms ease;
+  outline: 1px dashed transparent;
+  outline-offset: 2px;
+}
+.bn-editor .bn-block:hover > .bn-block-content,
+.bn-editor .bn-block-content:focus-within {
+  outline-color: rgba(255, 255, 255, 0.08);
+}
+
+/*
+ * Empty-block placeholder — BlockNote emits "Enter text or type '/' for
+ * commands" on the current empty block via a data attribute. Ensure it's
+ * visible against the dark surface (some skins render it at 0.3 opacity).
+ */
+.bn-editor .bn-block-content[data-is-empty-and-focused="true"] > *:first-child::before,
+.bn-editor .bn-inline-content:empty::before {
+  color: var(--text-disabled) !important;
+  opacity: 1 !important;
+}
+/* Cover the case where BN uses a different selector on the last trailing
+   paragraph — apply the same muted color to any placeholder pseudo. */
+.bn-editor [data-placeholder]::before {
+  color: var(--text-disabled) !important;
+  opacity: 1 !important;
+  content: attr(data-placeholder) !important;
+  pointer-events: none;
+}
 
 .bn-editor .bn-block-content p,
 .bn-editor .bn-block-content li {
