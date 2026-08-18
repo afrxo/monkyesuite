@@ -12,6 +12,7 @@ import {
   DialogPortal,
 } from "../components/ui/dialog";
 import { Dialog as DialogPrimitive } from "radix-ui";
+import { Skeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
 
 type Props = {
@@ -186,7 +187,13 @@ function Renderer({ attachment }: { attachment: TaskAttachment }) {
   }
 
   if (urlState.status === "loading" || urlState.status === "idle") {
-    return <div className="p-10 text-[11px] text-text-disabled">Loading…</div>;
+    // The viewer frame is already open at this point — a shaped block keeps
+    // its box the same size the media will occupy instead of collapsing it.
+    return (
+      <div className="grid place-items-center p-10">
+        <Skeleton w="min(560px, 100%)" h={320} className="rounded-md" />
+      </div>
+    );
   }
   if (urlState.status === "error") {
     return (

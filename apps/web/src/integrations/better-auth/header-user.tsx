@@ -4,6 +4,7 @@
 // import path, and reimplementing it here keeps that tree unmodified.
 
 import { Link } from "@tanstack/react-router";
+import { Skeleton } from "#/components/Skeleton";
 import { useSession, useSignOut } from "#/lib/auth";
 
 export default function BetterAuthHeader() {
@@ -11,16 +12,9 @@ export default function BetterAuthHeader() {
   const signOut = useSignOut();
 
   if (isPending) {
-    return (
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: "50%",
-          background: "var(--surface-1)",
-        }}
-      />
-    );
+    // Session resolve is short; a shimmering slot of the exact final size
+    // holds the header layout without reading as a broken avatar.
+    return <Skeleton w={32} h={32} round />;
   }
 
   if (!user) {

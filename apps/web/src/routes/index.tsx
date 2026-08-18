@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import PulseFeed from "../components/PulseFeed";
+import PulseSkeleton from "../components/feed/PulseSkeleton";
 import { api } from "../lib/api";
 import { adaptPulsePayload } from "../lib/pulse-adapter";
 
@@ -63,11 +64,7 @@ function PulseRoute() {
     return () => clearInterval(id);
   }, [router]);
 
-  if (q.isPending) {
-    return (
-      <div className="mt-24 text-center text-sm text-text-4">Waking pulse…</div>
-    );
-  }
+  if (q.isPending) return <PulseSkeleton />;
   if (q.isError) {
     return (
       <div className="mt-24 text-center text-sm text-lifecycle-declining">

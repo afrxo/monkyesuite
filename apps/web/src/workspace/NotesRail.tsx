@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
+import { Skeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
 import { MiniAvatar } from "./BoardView";
@@ -130,7 +131,7 @@ function NotesTab({
         pending={create.isPending}
       />
       {isLoading ? (
-        <p className="text-xs text-text-disabled">Loading…</p>
+        <NotesSkeleton />
       ) : notes.length === 0 ? (
         <p className="text-xs text-text-disabled">No notes yet.</p>
       ) : (
@@ -147,6 +148,21 @@ function NotesTab({
         </ul>
       )}
     </>
+  );
+}
+
+// Note rows are short, stacked and uniform — a few staggered lines read as
+// "notes are coming" without pretending to know how many.
+function NotesSkeleton() {
+  return (
+    <ul className="flex flex-col gap-4 pt-1">
+      {[82, 64, 91, 58].map((w) => (
+        <li key={`note-${w}`} className="flex flex-col gap-2">
+          <Skeleton w={`${w}%`} h={12} />
+          <Skeleton w="46%" h={9} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
