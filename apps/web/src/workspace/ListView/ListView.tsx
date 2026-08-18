@@ -42,7 +42,7 @@ const COLUMNS: { key: SortColumn; label: string; align?: "end" }[] = [
   { key: "tags", label: "Tags" },
   { key: "assignees", label: "Who" },
   { key: "date", label: "Due" },
-  { key: "signals", label: "Signals", align: "end" },
+  { key: "signals", label: "Progress", align: "end" },
 ];
 
 function loadCollapsed(projectId: string): Set<string> {
@@ -226,7 +226,7 @@ export function ListView({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: intentional focus zone
         tabIndex={0}
         onKeyDown={onKeyDown}
-        className="min-h-0 flex-1 overflow-y-auto outline-none"
+        className="ws-scroll min-h-0 flex-1 overflow-y-auto outline-none"
       >
         {/* Column header (sortable) */}
         <div

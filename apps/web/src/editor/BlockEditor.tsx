@@ -1067,26 +1067,50 @@ function insertSlashBlock(
     Schema["styleSchema"]
   >,
 ) {
-  const current = editor.getTextCursorPosition().block;
-  const content = current.content;
-  const isEmpty =
-    !content ||
-    (Array.isArray(content) &&
-      (content.length === 0 ||
-        (content.length === 1 &&
-          content[0]?.type === "text" &&
-          (content[0].text === "" || content[0].text === "/"))));
-  const [inserted] = isEmpty
-    ? [editor.updateBlock(current, block)]
-    : editor.insertBlocks([block], current, "after");
-  if (inserted) {
+  // BN's SuggestionMenuController runs closeMenu() + clearQuery() BEFORE
+  // firing our onItemClick, which triggers a ProseMirror transaction that
+  // moves the cursor. If we call editor.updateBlock in the same tick, the
+  // block reference we captured is often stale by the time BN's own effect
+  // fires. Deferring to the next microtask lets clearQuery's transaction
+  // settle before we run ours.
+  queueMicrotask(() => {
     try {
-      editor.setTextCursorPosition(inserted, "end");
-    } catch {
-      /* setTextCursorPosition throws for content-less blocks (divider,
-         image, refEmbed); safe to swallow — the block still lands. */
+      const current = editor.getTextCursorPosition().block;
+      const content = current.content as
+        | { type?: string; text?: string }[]
+        | undefined;
+      const isEmpty =
+        !content ||
+        (Array.isArray(content) &&
+          (content.length === 0 ||
+            (content.length === 1 &&
+              content[0]?.type === "text" &&
+              (!content[0].text || content[0].text === "/"))));
+      let inserted: unknown;
+      if (isEmpty) {
+        inserted = editor.updateBlock(current, block);
+      } else {
+        const rows = editor.insertBlocks([block], current, "after");
+        inserted = rows[0];
+      }
+      if (inserted) {
+        try {
+          editor.setTextCursorPosition(
+            inserted as Parameters<
+              typeof editor.setTextCursorPosition
+            >[0],
+            "end",
+          );
+        } catch {
+          /* setTextCursorPosition throws for content-less blocks (divider,
+             image, refEmbed); safe to swallow — the block still lands. */
+        }
+      }
+      editor.focus();
+    } catch (err) {
+      console.error("[BlockEditor] insertSlashBlock failed", err);
     }
-  }
+  });
 }
 
 function calloutSlashItems(editor: BNEditor) {

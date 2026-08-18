@@ -239,9 +239,6 @@ export function ListRow({
           />
         ) : null}
 
-        <span className="shrink-0 font-mono text-[10px] text-text-disabled">
-          {shortTaskId(projectSlug, task.id)}
-        </span>
         <span
           className={`truncate ${
             recessive ? "text-[13px] text-text-3" : "text-text-1"
