@@ -61,6 +61,17 @@
  * items with p-3 around the icon and text-base labels; both are too big
  * against the rest of the workspace.
  */
+/* Kill the outer popover shell — shadcn's Popover wraps the menu in its own
+   card, producing the ghosted rectangle behind. */
+[data-radix-popper-content-wrapper]:has(.bn-suggestion-menu),
+.bn-popover:has(.bn-suggestion-menu),
+.bn-suggestion-menu-wrapper {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
 .bn-suggestion-menu {
   background: var(--surface-1) !important;
   border: 1px solid var(--border-1) !important;
@@ -70,8 +81,27 @@
   padding: 4px !important;
   min-width: 240px !important;
   max-height: 340px !important;
-  ring: 0 !important;
+  overflow-y: auto !important;
   font-family: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+.bn-suggestion-menu::-webkit-scrollbar {
+  width: 8px;
+}
+.bn-suggestion-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+.bn-suggestion-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.bn-suggestion-menu::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 .bn-suggestion-menu [role="option"] {
   padding: 6px 8px !important;
