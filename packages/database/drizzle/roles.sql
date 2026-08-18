@@ -90,6 +90,7 @@ grant select, insert, update, delete on
   project_tags,
   task_tags,
   task_assignees,
+  doc_folders,
   docs,
   notes,
   project_game,
@@ -122,6 +123,9 @@ do $$ begin
     grant execute on function project_of_project_tag(uuid) to monkye_app;
     grant execute on function create_project(text, text, text, text) to monkye_app;
     grant execute on function remove_member(uuid, text) to monkye_app;
+  end if;
+  if exists (select from pg_proc where proname = 'project_of_doc_folder') then
+    grant execute on function project_of_doc_folder(uuid) to monkye_app;
   end if;
   -- Adding a collaborator, owner and admin paths (specs/06 §6.3, specs/09
   -- §9.3a). Privileged insert with the collaborator cap enforced inside the

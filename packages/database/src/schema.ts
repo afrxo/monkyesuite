@@ -1053,8 +1053,44 @@ export const tasks = pgTable(
 ).enableRLS();
 
 /**
+ * doc_folders — one level of grouping for docs. Rename/reorder without touching
+ * the docs themselves; deleting a folder detaches its docs (they float back to
+ * the root of the docs list, not deleted).
+ */
+export const docFolders = pgTable(
+  "doc_folders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    orderKey: text("order_key").notNull(), // fractional index within a project
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("doc_folders_project_idx").on(t.projectId, t.orderKey),
+    pgPolicy("doc_folders_member_rw", {
+      for: "all",
+      using: memberOf(t.projectId),
+      withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
  * docs — long-form project documents (specs, design notes, meeting notes),
- * distinct from the short pinned `notes` below.
+ * distinct from the short pinned `notes` below. Ordered manually via a
+ * fractional index within (project, folder) — a doc with `folder_id = null`
+ * lives at the project root.
  */
 export const docs = pgTable(
   "docs",
@@ -1063,6 +1099,10 @@ export const docs = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    folderId: uuid("folder_id").references(() => docFolders.id, {
+      onDelete: "set null",
+    }),
+    orderKey: text("order_key").notNull(),
     title: text("title").notNull(),
     body: text("body"), // markdown
     createdBy: text("created_by")
@@ -1077,6 +1117,11 @@ export const docs = pgTable(
   },
   (t) => [
     index("docs_project_idx").on(t.projectId),
+    index("docs_project_folder_order_idx").on(
+      t.projectId,
+      t.folderId,
+      t.orderKey,
+    ),
     pgPolicy("docs_member_rw", {
       for: "all",
       using: memberOf(t.projectId),

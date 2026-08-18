@@ -86,6 +86,11 @@ create or replace function project_of_project_tag(p uuid) returns uuid
     select project_id from project_tags where id = p;
   $$;
 
+create or replace function project_of_doc_folder(p uuid) returns uuid
+  language sql stable security definer set search_path = public as $$
+    select project_id from doc_folders where id = p;
+  $$;
+
 -- ---------------------------------------------------------------------------
 -- Membership mutations. `memberships` intentionally has NO insert/delete RLS
 -- policy (schema.ts): the very first owner row can't satisfy an ownerOf check
@@ -215,5 +220,6 @@ revoke all on function project_of_milestone(uuid) from public;
 revoke all on function project_of_doc(uuid) from public;
 revoke all on function project_of_note(uuid) from public;
 revoke all on function project_of_project_tag(uuid) from public;
+revoke all on function project_of_doc_folder(uuid) from public;
 revoke all on function add_member_by_email(uuid, text, text) from public;
 revoke all on function admin_add_member(uuid, text, text, text) from public;

@@ -9,6 +9,7 @@ import type {
   CreateMilestoneInput,
   CreateProjectGameInput,
   Doc,
+  DocFolder,
   Milestone,
   ProjectGame,
 } from "@monkyesuite/shared";
@@ -101,7 +102,7 @@ function Item({
           : "text-text-3 hover:bg-white/[0.04] hover:text-text-1"
       }`}
     >
-      <span className="grid h-4 w-4 place-items-center text-xs text-text-disabled">
+      <span className="grid h-4 w-4 shrink-0 place-items-center text-xs text-text-disabled">
         {glyph}
       </span>
       <span className="truncate">{children}</span>
@@ -160,7 +161,7 @@ function ItemWithMenu({
         onClick={onClick}
         className="flex flex-1 items-center gap-2 truncate text-left"
       >
-        <span className="grid h-4 w-4 place-items-center text-xs text-text-disabled">
+        <span className="grid h-4 w-4 shrink-0 place-items-center text-xs text-text-disabled">
           {glyph}
         </span>
         <span className="truncate">{children}</span>
@@ -300,24 +301,515 @@ function DocSection({
   onSelect: (id: string | null) => void;
   onCreate: () => void;
 }) {
+  const qc = useQueryClient();
   const docs = useQuery({
     queryKey: ["docs", projectId],
     queryFn: () => api.docs(projectId),
   });
+  const folders = useQuery({
+    queryKey: ["doc-folders", projectId],
+    queryFn: () => api.docFolders(projectId),
+  });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["docs", projectId] });
+    qc.invalidateQueries({ queryKey: ["doc-folders", projectId] });
+  };
+
+  const [addOpen, setAddOpen] = useState<"none" | "menu" | "folder">("none");
+  const [drag, setDrag] = useState<{ id: string } | null>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      return JSON.parse(
+        localStorage.getItem(`docFolders:collapsed:${projectId}`) ?? "{}",
+      ) as Record<string, boolean>;
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(
+      `docFolders:collapsed:${projectId}`,
+      JSON.stringify(collapsed),
+    );
+  }, [collapsed, projectId]);
+
+  const createFolder = useMutation({
+    mutationFn: (name: string) => api.createDocFolder(projectId, { name }),
+    onSuccess: () => {
+      invalidate();
+      setAddOpen("none");
+    },
+    onError: (err) => toastError(err),
+  });
+  const patchDoc = useMutation({
+    mutationFn: (v: {
+      id: string;
+      folderId?: string | null;
+      prevId?: string | null;
+      nextId?: string | null;
+    }) => {
+      const { id, ...rest } = v;
+      return api.patchDoc(id, rest);
+    },
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
+  const renameDoc = useMutation({
+    mutationFn: (v: { id: string; title: string }) =>
+      api.patchDoc(v.id, { title: v.title }),
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
+  const deleteDoc = useMutation({
+    mutationFn: (id: string) => api.deleteDoc(id),
+    onSuccess: (_, id) => {
+      invalidate();
+      if (activeId === id) onSelect(null);
+    },
+    onError: (err) => toastError(err),
+  });
+  const renameFolder = useMutation({
+    mutationFn: (v: { id: string; name: string }) =>
+      api.patchDocFolder(v.id, { name: v.name }),
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
+  const deleteFolder = useMutation({
+    mutationFn: (id: string) => api.deleteDocFolder(id),
+    onSuccess: invalidate,
+    onError: (err) => toastError(err),
+  });
+
+  const allDocs: Doc[] = docs.data ?? [];
+  const allFolders: DocFolder[] = folders.data ?? [];
+  const docsByFolder = new Map<string | null, Doc[]>();
+  for (const d of allDocs) {
+    const k = d.folderId ?? null;
+    const list = docsByFolder.get(k) ?? [];
+    list.push(d);
+    docsByFolder.set(k, list);
+  }
+  const rootDocs = docsByFolder.get(null) ?? [];
+
+  const onDropInto = (
+    folderId: string | null,
+    beforeId: string | null,
+  ) => {
+    if (!drag) return;
+    const dest = (docsByFolder.get(folderId) ?? []).filter(
+      (d) => d.id !== drag.id,
+    );
+    const idx = beforeId ? dest.findIndex((d) => d.id === beforeId) : dest.length;
+    const prevId = idx > 0 ? (dest[idx - 1]?.id ?? null) : null;
+    const nextId = idx < dest.length ? (dest[idx]?.id ?? null) : null;
+    const current = allDocs.find((d) => d.id === drag.id);
+    const currentFolder = current?.folderId ?? null;
+    if (currentFolder === folderId) {
+      patchDoc.mutate({ id: drag.id, prevId, nextId });
+    } else {
+      patchDoc.mutate({ id: drag.id, folderId, prevId, nextId });
+    }
+    setDrag(null);
+  };
+
   return (
     <section className="ws-section mb-5">
-      <SectionHead label="Docs" onAdd={onCreate} />
-      {docs.data?.map((d: Doc) => (
-        <Item
-          key={d.id}
-          active={d.id === activeId}
-          onClick={() => onSelect(d.id === activeId ? null : d.id)}
-          glyph={<Icon name="doc" size={14} />}
-        >
-          {d.title || "Untitled"}
-        </Item>
-      ))}
+      <SectionHead label="Docs" onAdd={() => setAddOpen("menu")} />
+      {addOpen === "menu" ? (
+        <div className="mx-1.5 mb-1 flex gap-1 rounded border border-border-1 bg-surface-1 p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setAddOpen("none");
+              onCreate();
+            }}
+            className="flex-1 rounded px-2 py-1 text-left text-xs text-text-3 hover:bg-white/[0.05] hover:text-text-1"
+          >
+            + Doc
+          </button>
+          <button
+            type="button"
+            onClick={() => setAddOpen("folder")}
+            className="flex-1 rounded px-2 py-1 text-left text-xs text-text-3 hover:bg-white/[0.05] hover:text-text-1"
+          >
+            + Folder
+          </button>
+        </div>
+      ) : null}
+      {addOpen === "folder" ? (
+        <InlineForm
+          placeholder="Folder name"
+          onSubmit={(name) => createFolder.mutate(name)}
+          onCancel={() => setAddOpen("none")}
+        />
+      ) : null}
+
+      {allFolders.map((f) => {
+        const folderDocs = docsByFolder.get(f.id) ?? [];
+        const isCollapsed = !!collapsed[f.id];
+        return (
+          <FolderRow
+            key={f.id}
+            folder={f}
+            collapsed={isCollapsed}
+            docCount={folderDocs.length}
+            onToggle={() =>
+              setCollapsed((c) => ({ ...c, [f.id]: !c[f.id] }))
+            }
+            onRename={(name) => renameFolder.mutate({ id: f.id, name })}
+            onDelete={() => {
+              if (
+                confirm(
+                  `Delete folder "${f.name}"? Docs inside float back to the root.`,
+                )
+              )
+                deleteFolder.mutate(f.id);
+            }}
+            onDropDoc={() => onDropInto(f.id, null)}
+          >
+            {!isCollapsed &&
+              folderDocs.map((d) => (
+                <DocRow
+                  key={d.id}
+                  doc={d}
+                  active={d.id === activeId}
+                  indent
+                  onClick={() =>
+                    onSelect(d.id === activeId ? null : d.id)
+                  }
+                  onDragStart={() => setDrag({ id: d.id })}
+                  onDropBefore={() => onDropInto(f.id, d.id)}
+                  onRename={(title) =>
+                    renameDoc.mutate({ id: d.id, title })
+                  }
+                  onDelete={() => {
+                    if (confirm(`Delete doc "${d.title}"?`))
+                      deleteDoc.mutate(d.id);
+                  }}
+                />
+              ))}
+          </FolderRow>
+        );
+      })}
+
+      {/* Root-level docs (below folders). Doubles as a drop zone. */}
+      <RootDropZone onDrop={() => onDropInto(null, null)}>
+        {rootDocs.map((d) => (
+          <DocRow
+            key={d.id}
+            doc={d}
+            active={d.id === activeId}
+            onClick={() => onSelect(d.id === activeId ? null : d.id)}
+            onDragStart={() => setDrag({ id: d.id })}
+            onDropBefore={() => onDropInto(null, d.id)}
+            onRename={(title) => renameDoc.mutate({ id: d.id, title })}
+            onDelete={() => {
+              if (confirm(`Delete doc "${d.title}"?`)) deleteDoc.mutate(d.id);
+            }}
+          />
+        ))}
+      </RootDropZone>
     </section>
+  );
+}
+
+function FolderRow({
+  folder,
+  collapsed,
+  docCount,
+  onToggle,
+  onRename,
+  onDelete,
+  onDropDoc,
+  children,
+}: {
+  folder: DocFolder;
+  collapsed: boolean;
+  docCount: number;
+  onToggle: () => void;
+  onRename: (name: string) => void;
+  onDelete: () => void;
+  onDropDoc: () => void;
+  children?: React.ReactNode;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [over, setOver] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setMenuOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  return (
+    <div>
+      <div
+        ref={wrapRef}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          onDropDoc();
+        }}
+        className={`group relative flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-text-3 transition-colors hover:bg-white/[0.04] hover:text-text-1 ${over ? "ring-1 ring-inset ring-accent-warm" : ""}`}
+      >
+        {editing ? (
+          <InlineForm
+            placeholder={folder.name}
+            onSubmit={(v) => {
+              onRename(v);
+              setEditing(false);
+            }}
+            onCancel={() => setEditing(false)}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onToggle}
+              className="flex flex-1 items-center gap-2 truncate text-left"
+            >
+              <span className="grid h-4 w-4 shrink-0 place-items-center text-text-disabled">
+                <Icon
+                  name="chevron-down"
+                  size={10}
+                  className={`transition-transform ${collapsed ? "-rotate-90" : ""}`}
+                />
+              </span>
+              <span className="truncate font-medium">{folder.name}</span>
+            </button>
+            <span className="font-mono text-[11px] text-text-disabled group-hover:hidden">
+              {docCount}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
+              aria-label="Actions"
+              className={`grid h-5 w-5 shrink-0 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors ${
+                menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              <Icon name="more" size={12} />
+            </button>
+          </>
+        )}
+        {menuOpen ? (
+          <div className="absolute right-0 top-7 z-10 w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                setEditing(true);
+              }}
+              className="block w-full px-3 py-2 text-left text-xs text-text-3 hover:bg-white/[0.05]"
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                onDelete();
+              }}
+              className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05]"
+            >
+              Delete
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function DocRow({
+  doc,
+  active,
+  indent,
+  onClick,
+  onDragStart,
+  onDropBefore,
+  onRename,
+  onDelete,
+}: {
+  doc: Doc;
+  active: boolean;
+  indent?: boolean;
+  onClick: () => void;
+  onDragStart: () => void;
+  onDropBefore: () => void;
+  onRename: (title: string) => void;
+  onDelete: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [over, setOver] = useState(false);
+  const draggedRef = useRef(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setMenuOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 draggable row
+    <div
+      ref={wrapRef}
+      draggable={!editing}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        draggedRef.current = true;
+        onDragStart();
+      }}
+      onDragEnd={() => {
+        setTimeout(() => {
+          draggedRef.current = false;
+        }, 0);
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setOver(false);
+        onDropBefore();
+      }}
+      className={`group relative flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
+        active
+          ? "bg-white/[0.05] text-text-1"
+          : "text-text-3 hover:bg-white/[0.04] hover:text-text-1"
+      } ${over ? "border-t border-accent-warm" : ""} ${indent ? "pl-6" : ""}`}
+    >
+      {editing ? (
+        <InlineForm
+          placeholder={doc.title}
+          onSubmit={(v) => {
+            onRename(v);
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              if (draggedRef.current) return;
+              onClick();
+            }}
+            className="flex flex-1 items-center gap-2 truncate text-left"
+          >
+            <span className="grid h-4 w-4 shrink-0 place-items-center text-text-disabled">
+              <Icon name="doc" size={13} />
+            </span>
+            <span className="truncate">{doc.title || "Untitled"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+            aria-label="Actions"
+            className={`grid h-5 w-5 shrink-0 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors ${
+              menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            }`}
+          >
+            <Icon name="more" size={12} />
+          </button>
+        </>
+      )}
+      {menuOpen ? (
+        <div className="absolute right-0 top-7 z-10 w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              setEditing(true);
+            }}
+            className="block w-full px-3 py-2 text-left text-xs text-text-3 hover:bg-white/[0.05]"
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              onDelete();
+            }}
+            className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05]"
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RootDropZone({
+  onDrop,
+  children,
+}: {
+  onDrop: () => void;
+  children: React.ReactNode;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: drop target
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        onDrop();
+      }}
+      className={`min-h-[8px] rounded ${over ? "bg-white/[0.03]" : ""}`}
+    >
+      {children}
+    </div>
   );
 }
 

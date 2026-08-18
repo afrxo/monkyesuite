@@ -227,9 +227,30 @@ export const patchDocSchema = z
   .object({
     title: z.string().min(1).max(200).optional(),
     body: z.string().max(100000).nullable().optional(),
+    // Move + reorder: folderId=null → move to root; prevId/nextId name
+    // neighbours in the destination folder; the server computes the orderKey.
+    folderId: z.string().uuid().nullable().optional(),
+    prevId: z.string().uuid().nullable().optional(),
+    nextId: z.string().uuid().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, "no fields to update");
 export type PatchDocInput = z.infer<typeof patchDocSchema>;
+
+/* ------------------------------ doc folders ------------------------------- */
+
+export const createDocFolderSchema = z.object({
+  name: z.string().min(1).max(120),
+});
+export type CreateDocFolderInput = z.infer<typeof createDocFolderSchema>;
+
+export const patchDocFolderSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    prevId: z.string().uuid().nullable().optional(),
+    nextId: z.string().uuid().nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, "no fields to update");
+export type PatchDocFolderInput = z.infer<typeof patchDocFolderSchema>;
 
 /* --------------------------- project-note writes -------------------------- */
 

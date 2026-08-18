@@ -422,8 +422,20 @@ export interface AttachmentViewTicket {
 export interface Doc {
   id: string;
   projectId: string;
+  folderId: string | null;
+  orderKey: string;
   title: string;
   body: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocFolder {
+  id: string;
+  projectId: string;
+  name: string;
+  orderKey: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

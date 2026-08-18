@@ -8,6 +8,7 @@ import type {
   Board,
   CreateChecklistItemInput,
   CreateCommentInput,
+  CreateDocFolderInput,
   CreateDocInput,
   CreateGameNoteInput,
   CreateMilestoneInput,
@@ -19,6 +20,7 @@ import type {
   CreateTaskInput,
   DemandOverlay,
   Doc,
+  DocFolder,
   FeedItem,
   FeedSort,
   GameDetail,
@@ -36,6 +38,7 @@ import type {
   Paged,
   PatchChecklistItemInput,
   PatchCommentInput,
+  PatchDocFolderInput,
   PatchDocInput,
   PatchGameNoteInput,
   PatchMilestoneInput,
@@ -223,6 +226,14 @@ export const api = {
   patchDoc: (docId: string, input: PatchDocInput) =>
     patch<Doc>(`/docs/${docId}`, input),
   deleteDoc: (docId: string) => del(`/docs/${docId}`),
+
+  // Doc folders.
+  docFolders: (id: string) => get<DocFolder[]>(`/projects/${id}/doc-folders`),
+  createDocFolder: (id: string, input: CreateDocFolderInput) =>
+    post<DocFolder>(`/projects/${id}/doc-folders`, input),
+  patchDocFolder: (folderId: string, input: PatchDocFolderInput) =>
+    patch<DocFolder>(`/doc-folders/${folderId}`, input),
+  deleteDocFolder: (folderId: string) => del(`/doc-folders/${folderId}`),
 
   // Project notes.
   projectNotes: (id: string) => get<ProjectNote[]>(`/projects/${id}/notes`),
