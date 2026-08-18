@@ -310,6 +310,39 @@ body::-webkit-scrollbar { display: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 
+/* Tailwind v4's preflight drops the UA `cursor: pointer` on buttons, which
+   leaves every action in the app feeling inert. Put it back globally for
+   things that are actually actionable, and mark disabled/busy ones. Text
+   inputs keep their own caret cursor — this only targets controls. */
+@layer base {
+  button:not(:disabled),
+  summary,
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  a[href],
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"],
+  [data-disabled] {
+    cursor: not-allowed;
+  }
+
+  /* Draggable board cards read as grabbable, not clickable. */
+  [draggable="true"] { cursor: grab; }
+  [draggable="true"]:active { cursor: grabbing; }
+}
+
 /* Themed scrollbar for panes that DO want scroll affordance (notes rail,
    slash menu, doc outline overflow). Matches the workspace's monochrome
    palette instead of the OS's stark defaults. */

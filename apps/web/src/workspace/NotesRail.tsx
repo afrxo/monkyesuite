@@ -264,10 +264,10 @@ function NoteItem({
         <button
           type="button"
           onClick={onDelete}
-          className="grid h-5 w-5 place-items-center rounded text-text-disabled hover:text-rose-300 transition-colors"
+          className="grid h-5 w-5 place-items-center rounded text-text-disabled transition-colors hover:bg-destructive/15 hover:text-rose-300"
           title="Delete note"
         >
-          <Icon name="x" size={11} />
+          <Icon name="trash" size={11} />
         </button>
       </div>
       {note.anchorQuote ? (
