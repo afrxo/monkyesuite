@@ -687,7 +687,7 @@ function Editor({
         </div>
       ) : null}
 
-      <div className="relative flex flex-1 justify-center overflow-y-auto pb-16 pt-8">
+      <div className="ws-scroll relative flex flex-1 justify-center overflow-y-auto pb-6 pt-8">
         <div className="w-full max-w-[720px] px-6 md:px-12">
           <DocCover
             docId={doc.id}
