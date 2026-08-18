@@ -14,28 +14,40 @@
   padding-inline: 0 !important;
 }
 
+/* BlockNote applies heading styles to the .bn-block-content element itself
+   via [data-content-type=heading] and hard-codes padding-top: 18px on it —
+   that's the "weird top margin". Override both the content-level padding and
+   any nested h1/h2/h3 element. */
+.bn-editor .bn-block-content[data-content-type="heading"] {
+  padding-top: 8px !important;
+  padding-bottom: 2px !important;
+  color: var(--text-1);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.bn-editor .bn-block-content[data-content-type="heading"][data-level="1"] {
+  font-size: 24px;
+}
+.bn-editor .bn-block-content[data-content-type="heading"][data-level="2"] {
+  font-size: 19px;
+}
+.bn-editor .bn-block-content[data-content-type="heading"][data-level="3"] {
+  font-size: 16px;
+}
+/* Legacy safety net — if a build wraps text in real h1/h2/h3 nodes. */
 .bn-editor .bn-block-content h1,
 .bn-editor .bn-block-content h2,
 .bn-editor .bn-block-content h3 {
   color: var(--text-1);
   font-weight: 700;
   letter-spacing: -0.01em;
+  margin-block: 0 !important;
 }
-.bn-editor .bn-block-content h1 { font-size: 24px; margin-block: 14px 6px; }
-.bn-editor .bn-block-content h2 { font-size: 19px; margin-block: 12px 4px; }
-.bn-editor .bn-block-content h3 { font-size: 16px; margin-block: 10px 3px; }
-/* Kill top margin on the very first block so an opening heading doesn't sit
-   half a line lower than expected. Cover both the direct-child selector and
-   any BN wrapper class that sits between the group and the block. */
-.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h1,
-.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h2,
-.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content h3,
-.bn-editor .bn-block-group > .bn-block:first-child .bn-block-content p,
-.bn-editor .bn-block-group:first-child > .bn-block:first-child h1,
-.bn-editor .bn-block-group:first-child > .bn-block:first-child h2,
-.bn-editor .bn-block-group:first-child > .bn-block:first-child h3,
-.bn-editor > .bn-block-group > .bn-block:first-child *:first-child {
-  margin-top: 0 !important;
+/* First block in the document should sit flush — no leading padding. */
+.bn-editor > .bn-block-group > .bn-block-outer:first-child
+  .bn-block-content[data-content-type="heading"],
+.bn-editor > .bn-block-group > .bn-block-outer:first-child .bn-block-content {
+  padding-top: 0 !important;
 }
 
 /*
