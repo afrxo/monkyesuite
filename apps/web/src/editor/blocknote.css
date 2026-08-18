@@ -55,20 +55,21 @@
  * Signals editability without competing with the text.
  */
 /*
- * Notion-style block affordance — subtle background stripe on the block under
- * the cursor + on hover, always faintly visible. Uses background rather than
- * outline so adjacent blocks don't overlap or paint bounding rectangles.
+ * Notion-style block affordance — subtle background ONLY on hover / focus.
+ * The idle background stripe was stacking across adjacent blocks and read as
+ * one giant rectangle wrapping the whole group; removing it lets each block
+ * pop only when the pointer or caret is actually on it.
  */
 .bn-editor .bn-block > .bn-block-content {
   border-radius: 4px;
   padding-inline: 6px !important;
   margin-inline: -6px;
   transition: background-color 120ms ease;
-  background-color: rgba(255, 255, 255, 0.02);
+  background-color: transparent;
 }
 .bn-editor .bn-block:hover > .bn-block-content,
 .bn-editor .bn-block > .bn-block-content:focus-within {
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 /*
