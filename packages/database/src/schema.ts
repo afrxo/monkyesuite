@@ -1114,6 +1114,10 @@ export const docs = pgTable(
     icon: text("icon"),
     // Optional cover image URL (uploaded via the shared R2 pipeline).
     coverUrl: text("cover_url"),
+    // Soft-delete window for the client-side undo toast. All reads filter
+    // where deleted_at IS NULL. Purge happens out of band; the row stays
+    // recoverable indefinitely until it does.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

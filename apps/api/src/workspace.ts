@@ -77,6 +77,7 @@ const mapDoc = (d: typeof docs.$inferSelect): Doc => ({
   migratedToBlocks: d.migratedToBlocks,
   icon: d.icon,
   coverUrl: d.coverUrl,
+  deletedAt: d.deletedAt ? isoReq(d.deletedAt) : null,
   createdBy: d.createdBy,
   createdAt: isoReq(d.createdAt),
   updatedAt: isoReq(d.updatedAt),
@@ -231,7 +232,7 @@ export function workspaceRoutes(): Hono<AppEnv> {
       return tx
         .select()
         .from(docs)
-        .where(eq(docs.projectId, id))
+        .where(and(eq(docs.projectId, id), isNull(docs.deletedAt)))
         .orderBy(asc(docs.orderKey));
     });
     return c.json(rows.map(mapDoc));
@@ -350,9 +351,30 @@ export function workspaceRoutes(): Hono<AppEnv> {
     const id = uuidSchema.parse(c.req.param("id"));
     await withUser(userId, async (tx) => {
       await resolveItemAccess(tx, "doc", id, userId);
-      await tx.delete(docs).where(eq(docs.id, id));
+      // Soft delete — the undo window is client-side. A separate purge job
+      // (out of scope for this cut) reclaims rows past their retention.
+      await tx
+        .update(docs)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(docs.id, id));
     });
     return c.body(null, 204);
+  });
+
+  r.post("/docs/:id/restore", async (c) => {
+    const userId = requireUser(c);
+    const id = uuidSchema.parse(c.req.param("id"));
+    const doc = await withUser(userId, async (tx): Promise<Doc> => {
+      await resolveItemAccess(tx, "doc", id, userId);
+      const [row] = await tx
+        .update(docs)
+        .set({ deletedAt: null, updatedAt: new Date() })
+        .where(eq(docs.id, id))
+        .returning();
+      if (!row) throw notFound("No such doc.");
+      return mapDoc(row);
+    });
+    return c.json(doc);
   });
 
   /* --------------------------- doc media uploads ------------------------- */

@@ -230,6 +230,7 @@ export const api = {
   patchDoc: (docId: string, input: PatchDocInput) =>
     patch<Doc>(`/docs/${docId}`, input),
   deleteDoc: (docId: string) => del(`/docs/${docId}`),
+  restoreDoc: (docId: string) => post<Doc>(`/docs/${docId}/restore`, {}),
 
   patchDocMeta: (docId: string, input: PatchDocMetaInput) =>
     patch<Doc>(`/docs/${docId}/meta`, input),

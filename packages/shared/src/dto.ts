@@ -429,6 +429,7 @@ export interface Doc {
   migratedToBlocks: boolean;
   icon: string | null;
   coverUrl: string | null;
+  deletedAt: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

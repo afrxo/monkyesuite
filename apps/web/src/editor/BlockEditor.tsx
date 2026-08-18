@@ -54,6 +54,7 @@ import {
 import { BlockNoteView } from "@blocknote/shadcn";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { ApiError } from "../lib/api";
 import { toastError } from "../components/Toast";
 import { api } from "../lib/api";
@@ -66,6 +67,7 @@ import {
 import { DocCover } from "./DocCover";
 import { DocIcon } from "./DocIcon";
 import { DocOutline } from "./DocOutline";
+import { useImageLightbox } from "./ImageLightbox";
 import { ShortcutSheet } from "./ShortcutSheet";
 
 type Props = {
@@ -488,6 +490,23 @@ function Editor({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["docs", projectId] });
       clearDraft();
+      const docId = doc.id;
+      const title = doc.title || "Untitled";
+      toast(`Deleted "${title}"`, {
+        duration: 10_000,
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            try {
+              await api.restoreDoc(docId);
+              qc.invalidateQueries({ queryKey: ["docs", projectId] });
+              toast.success("Restored.");
+            } catch (err) {
+              toastError(err, "Failed to restore.");
+            }
+          },
+        },
+      });
       onExit();
     },
     onError: (err) => toastError(err),
@@ -543,6 +562,7 @@ function Editor({
   })();
 
   const editorDoc = editor.document as SchemaBlock[];
+  const lightbox = useImageLightbox();
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -587,10 +607,7 @@ function Editor({
         </div>
         <button
           type="button"
-          onClick={() => {
-            if (confirm(`Delete doc "${title || "Untitled"}"? This cannot be undone.`))
-              del.mutate();
-          }}
+          onClick={() => del.mutate()}
           className="rounded px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/10"
         >
           Delete
@@ -687,6 +704,7 @@ function Editor({
       {showShortcuts ? (
         <ShortcutSheet onClose={() => setShowShortcuts(false)} />
       ) : null}
+      {lightbox}
     </div>
   );
 }
