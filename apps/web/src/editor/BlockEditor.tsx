@@ -701,7 +701,12 @@ function Editor({
               getItems={async (query) =>
                 filterSuggestionItems(
                   [
-                    ...getDefaultReactSlashMenuItems(editor),
+                    // BN's defaults include their own emoji entries pointing
+                    // at the grid picker (which is disabled). Strip them so
+                    // /emo doesn't render three duplicates alongside ours.
+                    ...getDefaultReactSlashMenuItems(editor).filter(
+                      (i) => !/emoji/i.test(i.title),
+                    ),
                     ...calloutSlashItems(editor),
                     refEmbedSlashItem(editor, projectId),
                     emojiSlashItem(() => setShowEmojiPicker(true)),

@@ -19,7 +19,8 @@ export type IconName =
   | "link"
   | "clock"
   | "alert"
-  | "archive";
+  | "archive"
+  | "pencil";
 
 const icons: Record<IconName, React.ReactElement> = {
   plus: (
@@ -140,6 +141,13 @@ const icons: Record<IconName, React.ReactElement> = {
       <path d="M3 6v6.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6" />
       <polyline points="6,9.5 8,11.5 10,9.5" />
       <line x1="8" y1="7.5" x2="8" y2="11.5" />
+    </>
+  ),
+
+  pencil: (
+    <>
+      <path d="M11.5 2.5l2 2a1 1 0 0 1 0 1.414L5.5 14H2v-3.5l8.086-8.086a1 1 0 0 1 1.414 0z" />
+      <line x1="9.5" y1="4.5" x2="11.5" y2="6.5" />
     </>
   ),
 };

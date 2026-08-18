@@ -991,8 +991,20 @@ function RefSection({ projectId }: { projectId: string }) {
             link.mutate({ universeId: g.universeId, note: note || undefined })
           }
           onUnlink={() => {
-            if (confirm(`Unpin “${g.name}” from this project?`))
-              unlink.mutate(g.universeId);
+            const universeId = g.universeId;
+            const note = g.note ?? undefined;
+            const name = g.name;
+            unlink.mutate(universeId, {
+              onSuccess: () => {
+                toast(`Unpinned “${name}”`, {
+                  duration: 10_000,
+                  action: {
+                    label: "Undo",
+                    onClick: () => link.mutate({ universeId, note }),
+                  },
+                });
+              },
+            });
           }}
         />
       ))}
@@ -1017,28 +1029,9 @@ function RefRow({
   onEditNote: (note: string) => void;
   onUnlink: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) =>
-      e.key === "Escape" && setMenuOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
   return (
-    <div
-      ref={wrapRef}
-      className="group relative flex w-full items-start gap-2 rounded px-2 py-1.5 text-sm text-text-3 hover:bg-white/[0.04] hover:text-text-1 transition-colors"
-    >
+    <div className="group relative flex w-full items-start gap-2 rounded px-2 py-1.5 text-sm text-text-3 hover:bg-white/[0.04] hover:text-text-1 transition-colors">
       <Link
         to="/games/$id"
         params={{ id: String(game.universeId) }}
@@ -1064,46 +1057,34 @@ function RefRow({
           ) : null}
         </span>
       </Link>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setMenuOpen((v) => !v);
-        }}
-        aria-label="Actions"
-        className={`grid h-5 w-5 shrink-0 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors ${
-          menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        }`}
-      >
-        <Icon name="more" size={12} />
-      </button>
-      {menuOpen ? (
-        <div className="absolute right-1 top-7 z-10 w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen(false);
-              setEditing(true);
-            }}
-            className="block w-full px-3 py-2 text-left text-xs text-text-3 hover:bg-white/[0.05] transition-colors"
-          >
-            Edit note
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen(false);
-              onUnlink();
-            }}
-            className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05] transition-colors"
-          >
-            Unpin
-          </button>
-        </div>
-      ) : null}
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setEditing((v) => !v);
+          }}
+          aria-label={game.note ? "Edit note" : "Add note"}
+          title={game.note ? "Edit note" : "Add note"}
+          className="grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors"
+        >
+          <Icon name="pencil" size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onUnlink();
+          }}
+          aria-label="Unpin"
+          title="Unpin"
+          className="grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-destructive transition-colors"
+        >
+          <Icon name="x" size={12} />
+        </button>
+      </div>
       {editing ? (
         <div className="absolute inset-x-2 top-full z-10 mt-1">
           <RefNoteEditor
