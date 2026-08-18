@@ -225,6 +225,11 @@ function Editor({
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryDelay = useRef(1000);
   const retryCountdown = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Guards against concurrent saves. A second save fired before the first's
+  // response lands would send stale versions and get 409'd; queue the intent
+  // via `pendingSaveRef` and flush it once the in-flight save resolves.
+  const inFlightRef = useRef(false);
+  const pendingSaveRef = useRef(false);
 
   // Reading time (Phase 7): ~220 wpm reader on plain text. Only text-bearing
   // blocks contribute; code/divider/image are skipped by shape.
@@ -392,6 +397,16 @@ function Editor({
         }
       }
       snapshotRef.current = next;
+      // Keep the doc-blocks cache aligned with server truth so a remount (or
+      // a sibling reader) doesn't hand us a stale version that would 409 the
+      // very next save.
+      qc.setQueryData<DocBlocks>(["doc-blocks", doc.id], (prev) => {
+        if (!prev) return prev;
+        const map = new Map(prev.blocks.map((b) => [b.id, b]));
+        for (const id of deletedIds) map.delete(id);
+        for (const b of saved) map.set(b.id, b);
+        return { ...prev, blocks: Array.from(map.values()) };
+      });
       setLastSavedAt(new Date().toISOString());
       setPulse(true);
       setTimeout(() => setPulse(false), 1600);
@@ -408,6 +423,15 @@ function Editor({
       }
       setRetryIn(null);
       clearDraft();
+    },
+    onSettled: () => {
+      inFlightRef.current = false;
+      // If a change happened while we were mid-flight, flush it now so the
+      // debounce doesn't sit on the freshest edits.
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false;
+        setDirtyTick((n) => n + 1);
+      }
     },
     onError: (err) => {
       // Conflict: server has fresher blocks. Invalidate + refetch; user's
@@ -429,6 +453,11 @@ function Editor({
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
+    if (inFlightRef.current) {
+      pendingSaveRef.current = true;
+      return;
+    }
+    inFlightRef.current = true;
     if (title !== doc.title) saveTitle.mutate(title);
     saveBlocks.mutate();
   }, [title, doc.title, saveTitle, saveBlocks]);
@@ -537,6 +566,12 @@ function Editor({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null;
+      if (inFlightRef.current) {
+        // Save already running — mark that we need another after it settles.
+        pendingSaveRef.current = true;
+        return;
+      }
+      inFlightRef.current = true;
       if (title !== doc.title) saveTitle.mutate(title);
       saveBlocks.mutate();
     }, 1000);
@@ -1021,27 +1056,53 @@ function NoteAnchorButton({
 // ReturnType<>, since useCreateBlockNote is a generic React hook.
 type BNEditor = ReturnType<typeof useCreateBlockNote>;
 
+// Insert a block via the slash menu: replace the current block if it's empty
+// (or just the "/query"), otherwise append after — then move the cursor into
+// the new block so the user sees the change land where they typed.
+function insertSlashBlock(
+  editor: BNEditor,
+  block: PartialBlock<
+    Schema["blockSchema"],
+    Schema["inlineContentSchema"],
+    Schema["styleSchema"]
+  >,
+) {
+  const current = editor.getTextCursorPosition().block;
+  const content = current.content;
+  const isEmpty =
+    !content ||
+    (Array.isArray(content) &&
+      (content.length === 0 ||
+        (content.length === 1 &&
+          content[0]?.type === "text" &&
+          (content[0].text === "" || content[0].text === "/"))));
+  const [inserted] = isEmpty
+    ? [editor.updateBlock(current, block)]
+    : editor.insertBlocks([block], current, "after");
+  if (inserted) {
+    try {
+      editor.setTextCursorPosition(inserted, "end");
+    } catch {
+      /* setTextCursorPosition throws for content-less blocks (divider,
+         image, refEmbed); safe to swallow — the block still lands. */
+    }
+  }
+}
+
 function calloutSlashItems(editor: BNEditor) {
   const insert = (variant: "note" | "tip" | "warning" | "danger") => ({
     title: `${variant[0]?.toUpperCase()}${variant.slice(1)} callout`,
     group: "Callouts",
     onItemClick: () => {
-      const current = editor.getTextCursorPosition().block;
-      editor.insertBlocks(
-        [
-          {
-            type: "callout",
-            props: { variant },
-            content: [],
-          } as unknown as PartialBlock<
-            Schema["blockSchema"],
-            Schema["inlineContentSchema"],
-            Schema["styleSchema"]
-          >,
-        ],
-        current,
-        "after",
-      );
+      insertSlashBlock(editor, {
+        type: "callout",
+        props: { variant },
+        content: [],
+      } as unknown as PartialBlock<
+        Schema["blockSchema"],
+        Schema["inlineContentSchema"],
+        Schema["styleSchema"]
+      >);
     },
   });
   return [insert("note"), insert("tip"), insert("warning"), insert("danger")];
@@ -1099,21 +1160,14 @@ function refEmbedSlashItem(editor: BNEditor, projectId: string) {
       const input = window.prompt("Paste the roblox.com/games/ URL:") ?? "";
       const universeId = extractRobloxUniverseId(input);
       if (!universeId) return;
-      const current = editor.getTextCursorPosition().block;
-      editor.insertBlocks(
-        [
-          {
-            type: "refEmbed",
-            props: { universeId, projectId },
-          } as unknown as PartialBlock<
-            Schema["blockSchema"],
-            Schema["inlineContentSchema"],
-            Schema["styleSchema"]
-          >,
-        ],
-        current,
-        "after",
-      );
+      insertSlashBlock(editor, {
+        type: "refEmbed",
+        props: { universeId, projectId },
+      } as unknown as PartialBlock<
+        Schema["blockSchema"],
+        Schema["inlineContentSchema"],
+        Schema["styleSchema"]
+      >);
     },
   };
 }
