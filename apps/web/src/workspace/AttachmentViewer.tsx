@@ -6,6 +6,12 @@
 import type { TaskAttachment } from "@monkyesuite/shared";
 import { marked } from "marked";
 import { useEffect, useMemo, useState } from "react";
+import {
+  Dialog,
+  DialogOverlay,
+  DialogPortal,
+} from "../components/ui/dialog";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import { api } from "../lib/api";
 
 type Props = {
@@ -29,12 +35,6 @@ export function AttachmentViewer({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-        return;
-      }
       if (e.key === "ArrowLeft" && attachments.length > 1) {
         onIndex((index - 1 + attachments.length) % attachments.length);
       }
@@ -44,30 +44,37 @@ export function AttachmentViewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [attachments.length, index, onClose, onIndex]);
+  }, [attachments.length, index, onIndex]);
 
   if (!current) return null;
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: overlay dismiss target
-    <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
-      role="presentation"
-      className="fixed inset-0 z-[60] grid place-items-center bg-black/80 p-6"
     >
-      <div className="flex max-h-[90vh] w-full max-w-[90vw] flex-col overflow-hidden rounded-lg border border-border-2 bg-surface-0">
-        <ViewerHeader
-          attachment={current}
-          onClose={onClose}
-          hasNav={attachments.length > 1}
-        />
-        <div className="grid flex-1 place-items-center overflow-auto bg-black/40">
-          <Renderer attachment={current} />
-        </div>
-      </div>
-    </div>
+      <DialogPortal>
+        <DialogOverlay className="z-[60] bg-black/80" />
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className="fixed top-[50%] left-[50%] z-[60] flex max-h-[90vh] w-full max-w-[90vw] translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden rounded-lg border border-border-2 bg-surface-0 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+        >
+          <DialogPrimitive.Title className="sr-only">
+            {current.fileName}
+          </DialogPrimitive.Title>
+          <ViewerHeader
+            attachment={current}
+            onClose={onClose}
+            hasNav={attachments.length > 1}
+          />
+          <div className="grid flex-1 place-items-center overflow-auto bg-black/40">
+            <Renderer attachment={current} />
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    </Dialog>
   );
 }
 

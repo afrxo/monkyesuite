@@ -10,7 +10,7 @@ import { api } from "../lib/api";
 import type { BoardViewHandle } from "../workspace/BoardView";
 import { BoardView } from "../workspace/BoardView";
 import { CardModal } from "../workspace/CardModal";
-import { DocEditor } from "../workspace/DocEditor";
+import { BlockEditor } from "../editor";
 import { NotesRail } from "../workspace/NotesRail";
 import { shortTaskId } from "../workspace/short-id";
 import { Sidebar } from "../workspace/Sidebar";
@@ -155,7 +155,7 @@ function WorkspacePage() {
           onOpenRight={() => setMobileSheet("right")}
         />
         {activeDocId ? (
-          <DocEditor
+          <BlockEditor
             docId={activeDocId}
             projectId={id}
             onExit={() => setDoc(null)}

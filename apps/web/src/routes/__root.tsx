@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import AppHeader from "../components/AppHeader";
+import ToastHost from "../components/toast/ToastHost";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { ApiError } from "../lib/api";
 import { useSession } from "../lib/auth";
@@ -159,6 +160,7 @@ function RootComponent() {
           <AuthGate>
             <Layout />
           </AuthGate>
+          <ToastHost />
         </RootDocument>
       </TooltipProvider>
     </QueryClientProvider>

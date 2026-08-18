@@ -18,6 +18,12 @@ import { Link } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import { api } from "../lib/api";
 import { milestoneColor } from "./milestone-color";
 
@@ -133,23 +139,8 @@ function ItemWithMenu({
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
   return (
     <div
-      ref={wrapRef}
       className={`group relative flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
         active
           ? "bg-white/[0.05] text-text-1"
@@ -171,34 +162,28 @@ function ItemWithMenu({
           {count}
         </span>
       ) : null}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-label="Actions"
-        className={`grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors ${
-          open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        }`}
-      >
-        <Icon name="more" size={12} />
-      </button>
-      {open ? (
-        <div className="absolute right-0 top-7 z-10 w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onDelete();
-            }}
-            className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05] transition-colors"
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger
+          aria-label="Actions"
+          className={`grid h-5 w-5 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1 transition-colors ${
+            open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          <Icon name="more" size={12} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          sideOffset={4}
+          className="w-32 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg"
+        >
+          <DropdownMenuItem
+            onSelect={onDelete}
+            className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05] transition-colors focus:bg-white/[0.05] focus:text-destructive"
           >
             Delete
-          </button>
-        </div>
-      ) : null}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -316,7 +301,9 @@ function DocSection({
   };
 
   const [addOpen, setAddOpen] = useState<"none" | "menu" | "folder">("none");
-  const [drag, setDrag] = useState<{ id: string } | null>(null);
+  const [drag, setDrag] = useState<
+    { kind: "doc" | "folder"; id: string } | null
+  >(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     if (typeof window === "undefined") return {};
     try {
@@ -353,8 +340,40 @@ function DocSection({
       const { id, ...rest } = v;
       return api.patchDoc(id, rest);
     },
-    onSuccess: invalidate,
-    onError: (err) => toastError(err),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ["docs", projectId] });
+      const prev = qc.getQueryData<Doc[]>(["docs", projectId]);
+      if (!prev) return { prev };
+      const moving = prev.find((d) => d.id === v.id);
+      if (!moving) return { prev };
+      const targetFolder =
+        v.folderId === undefined ? moving.folderId : v.folderId;
+      const others = prev.filter((d) => d.id !== v.id);
+      const destSiblings = others.filter((d) => d.folderId === targetFolder);
+      let insertAt: number;
+      if (v.nextId) {
+        const nextSibling = destSiblings.find((d) => d.id === v.nextId);
+        insertAt = nextSibling
+          ? others.indexOf(nextSibling)
+          : others.length;
+      } else if (v.prevId) {
+        const prevSibling = destSiblings.find((d) => d.id === v.prevId);
+        insertAt = prevSibling ? others.indexOf(prevSibling) + 1 : others.length;
+      } else {
+        // append to end of destination folder
+        const lastInDest = destSiblings[destSiblings.length - 1];
+        insertAt = lastInDest ? others.indexOf(lastInDest) + 1 : others.length;
+      }
+      const next = [...others];
+      next.splice(insertAt, 0, { ...moving, folderId: targetFolder });
+      qc.setQueryData<Doc[]>(["docs", projectId], next);
+      return { prev };
+    },
+    onError: (err, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["docs", projectId], ctx.prev);
+      invalidate();
+      toastError(err);
+    },
   });
   const renameDoc = useMutation({
     mutationFn: (v: { id: string; title: string }) =>
@@ -375,6 +394,37 @@ function DocSection({
       api.patchDocFolder(v.id, { name: v.name }),
     onSuccess: invalidate,
     onError: (err) => toastError(err),
+  });
+  const moveFolder = useMutation({
+    mutationFn: (v: { id: string; prevId: string | null; nextId: string | null }) =>
+      api.patchDocFolder(v.id, { prevId: v.prevId, nextId: v.nextId }),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ["doc-folders", projectId] });
+      const prev = qc.getQueryData<DocFolder[]>(["doc-folders", projectId]);
+      if (!prev) return { prev };
+      const moving = prev.find((f) => f.id === v.id);
+      if (!moving) return { prev };
+      const others = prev.filter((f) => f.id !== v.id);
+      let insertAt: number;
+      if (v.nextId) {
+        const i = others.findIndex((f) => f.id === v.nextId);
+        insertAt = i < 0 ? others.length : i;
+      } else if (v.prevId) {
+        const i = others.findIndex((f) => f.id === v.prevId);
+        insertAt = i < 0 ? others.length : i + 1;
+      } else {
+        insertAt = others.length;
+      }
+      const next = [...others];
+      next.splice(insertAt, 0, moving);
+      qc.setQueryData<DocFolder[]>(["doc-folders", projectId], next);
+      return { prev };
+    },
+    onError: (err, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["doc-folders", projectId], ctx.prev);
+      invalidate();
+      toastError(err);
+    },
   });
   const deleteFolder = useMutation({
     mutationFn: (id: string) => api.deleteDocFolder(id),
@@ -397,7 +447,7 @@ function DocSection({
     folderId: string | null,
     beforeId: string | null,
   ) => {
-    if (!drag) return;
+    if (!drag || drag.kind !== "doc") return;
     const dest = (docsByFolder.get(folderId) ?? []).filter(
       (d) => d.id !== drag.id,
     );
@@ -411,6 +461,16 @@ function DocSection({
     } else {
       patchDoc.mutate({ id: drag.id, folderId, prevId, nextId });
     }
+    setDrag(null);
+  };
+
+  const onDropFolderBefore = (beforeId: string | null) => {
+    if (!drag || drag.kind !== "folder") return;
+    const list = allFolders.filter((f) => f.id !== drag.id);
+    const idx = beforeId ? list.findIndex((f) => f.id === beforeId) : list.length;
+    const prevId = idx > 0 ? (list[idx - 1]?.id ?? null) : null;
+    const nextId = idx < list.length ? (list[idx]?.id ?? null) : null;
+    moveFolder.mutate({ id: drag.id, prevId, nextId });
     setDrag(null);
   };
 
@@ -455,6 +515,7 @@ function DocSection({
             folder={f}
             collapsed={isCollapsed}
             docCount={folderDocs.length}
+            dragKind={drag?.kind ?? null}
             onToggle={() =>
               setCollapsed((c) => ({ ...c, [f.id]: !c[f.id] }))
             }
@@ -468,6 +529,8 @@ function DocSection({
                 deleteFolder.mutate(f.id);
             }}
             onDropDoc={() => onDropInto(f.id, null)}
+            onDragStart={() => setDrag({ kind: "folder", id: f.id })}
+            onDropFolderBefore={() => onDropFolderBefore(f.id)}
           >
             {!isCollapsed &&
               folderDocs.map((d) => (
@@ -479,7 +542,7 @@ function DocSection({
                   onClick={() =>
                     onSelect(d.id === activeId ? null : d.id)
                   }
-                  onDragStart={() => setDrag({ id: d.id })}
+                  onDragStart={() => setDrag({ kind: "doc", id: d.id })}
                   onDropBefore={() => onDropInto(f.id, d.id)}
                   onRename={(title) =>
                     renameDoc.mutate({ id: d.id, title })
@@ -494,6 +557,10 @@ function DocSection({
         );
       })}
 
+      {drag?.kind === "folder" && allFolders.length > 0 ? (
+        <FolderTailDrop onDrop={() => onDropFolderBefore(null)} />
+      ) : null}
+
       {/* Root-level docs (below folders). Doubles as a drop zone. */}
       <RootDropZone onDrop={() => onDropInto(null, null)}>
         {rootDocs.map((d) => (
@@ -502,7 +569,7 @@ function DocSection({
             doc={d}
             active={d.id === activeId}
             onClick={() => onSelect(d.id === activeId ? null : d.id)}
-            onDragStart={() => setDrag({ id: d.id })}
+            onDragStart={() => setDrag({ kind: "doc", id: d.id })}
             onDropBefore={() => onDropInto(null, d.id)}
             onRename={(title) => renameDoc.mutate({ id: d.id, title })}
             onDelete={() => {
@@ -519,24 +586,31 @@ function FolderRow({
   folder,
   collapsed,
   docCount,
+  dragKind,
   onToggle,
   onRename,
   onDelete,
   onDropDoc,
+  onDragStart,
+  onDropFolderBefore,
   children,
 }: {
   folder: DocFolder;
   collapsed: boolean;
   docCount: number;
+  dragKind: "doc" | "folder" | null;
   onToggle: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
   onDropDoc: () => void;
+  onDragStart: () => void;
+  onDropFolderBefore: () => void;
   children?: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [over, setOver] = useState(false);
+  const [over, setOver] = useState<"none" | "doc" | "folder">("none");
+  const draggedRef = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!menuOpen) return;
@@ -557,17 +631,34 @@ function FolderRow({
     <div>
       <div
         ref={wrapRef}
+        draggable={!editing}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          draggedRef.current = true;
+          onDragStart();
+        }}
+        onDragEnd={() => {
+          setTimeout(() => {
+            draggedRef.current = false;
+          }, 0);
+        }}
         onDragOver={(e) => {
           e.preventDefault();
-          setOver(true);
+          if (dragKind === "folder") {
+            setOver("folder");
+          } else if (dragKind === "doc") {
+            setOver("doc");
+          }
         }}
-        onDragLeave={() => setOver(false)}
+        onDragLeave={() => setOver("none")}
         onDrop={(e) => {
           e.preventDefault();
-          setOver(false);
-          onDropDoc();
+          e.stopPropagation();
+          if (over === "folder") onDropFolderBefore();
+          else if (over === "doc") onDropDoc();
+          setOver("none");
         }}
-        className={`group relative flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-text-3 transition-colors hover:bg-white/[0.04] hover:text-text-1 ${over ? "ring-1 ring-inset ring-accent-warm" : ""}`}
+        className={`group relative flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-text-3 transition-colors hover:bg-white/[0.04] hover:text-text-1 ${over === "doc" ? "ring-1 ring-inset ring-accent-warm" : ""} ${over === "folder" ? "border-t border-accent-warm" : ""}`}
       >
         {editing ? (
           <InlineForm
@@ -582,7 +673,10 @@ function FolderRow({
           <>
             <button
               type="button"
-              onClick={onToggle}
+              onClick={() => {
+                if (draggedRef.current) return;
+                onToggle();
+              }}
               className="flex flex-1 items-center gap-2 truncate text-left"
             >
               <span className="grid h-4 w-4 shrink-0 place-items-center text-text-disabled">
@@ -785,6 +879,36 @@ function DocRow({
   );
 }
 
+function FolderTailDrop({ onDrop }: { onDrop: () => void }) {
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    if (!over) return;
+    const clear = () => setOver(false);
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+    };
+  }, [over]);
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: drop target
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        onDrop();
+      }}
+      className={`mx-2 h-1.5 rounded ${over ? "bg-accent-warm/60" : ""}`}
+    />
+  );
+}
+
 function RootDropZone({
   onDrop,
   children,
@@ -793,6 +917,16 @@ function RootDropZone({
   children: React.ReactNode;
 }) {
   const [over, setOver] = useState(false);
+  useEffect(() => {
+    if (!over) return;
+    const clear = () => setOver(false);
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+    };
+  }, [over]);
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target
     <div

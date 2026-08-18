@@ -10,13 +10,13 @@ export const Route = createFileRoute("/sign-in")({
 function SignInPage() {
   const navigate = useNavigate();
   const signIn = useSignIn();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     signIn.mutate(
-      { email, password },
+      { username, password },
       { onSuccess: () => navigate({ to: "/projects" }) },
     );
   };
@@ -27,8 +27,8 @@ function SignInPage() {
         <Field
           label="Username"
           type="text"
-          value={email}
-          onChange={setEmail}
+          value={username}
+          onChange={setUsername}
           autoComplete="username"
         />
         <Field

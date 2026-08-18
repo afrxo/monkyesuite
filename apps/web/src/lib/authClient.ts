@@ -44,9 +44,11 @@ async function authFetch<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export const authClient = {
-  async signIn(email: string, password: string): Promise<SessionUser> {
+  async signIn(username: string, password: string): Promise<SessionUser> {
+    // API translates the `email` key to the synthetic user@internal-domain
+    // shape Better Auth's schema requires; users type/see a plain username.
     const r = await authFetch<{ user: SessionUser }>("/sign-in/email", {
-      email,
+      email: username,
       password,
     });
     return r.user;

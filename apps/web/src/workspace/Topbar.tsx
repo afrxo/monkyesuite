@@ -12,6 +12,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import AppHeader from "../components/AppHeader";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../components/ui/popover";
 import { ApiError, api } from "../lib/api";
 
 type Props = {
@@ -81,21 +88,28 @@ function AvatarStack({
           />
         ))}
         {ownRole === "owner" ? (
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            title="Invite collaborator"
-            className={`-ml-1.5 grid h-[22px] w-[22px] place-items-center rounded-full border border-dashed border-border-2 bg-transparent text-[11px] text-text-disabled transition hover:text-text-1 ${
-              members.length === 0 ? "ml-0" : ""
-            }`}
-          >
-            +
-          </button>
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title="Invite collaborator"
+                className={`-ml-1.5 grid h-[22px] w-[22px] place-items-center rounded-full border border-dashed border-border-2 bg-transparent text-[11px] text-text-disabled transition hover:text-text-1 ${
+                  members.length === 0 ? "ml-0" : ""
+                }`}
+              >
+                +
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              sideOffset={8}
+              className="w-72 border-border-1 bg-surface-1 p-3"
+            >
+              <InviteForm projectId={projectId} onClose={() => setOpen(false)} />
+            </PopoverContent>
+          </Popover>
         ) : null}
       </div>
-      {open && ownRole === "owner" ? (
-        <InvitePopover projectId={projectId} onClose={() => setOpen(false)} />
-      ) : null}
     </div>
   );
 }
@@ -133,7 +147,7 @@ function Avatar({
   );
 }
 
-function InvitePopover({
+function InviteForm({
   projectId,
   onClose,
 }: {
@@ -144,13 +158,6 @@ function InvitePopover({
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => inputRef.current?.focus(), []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const add = useMutation({
     mutationFn: (email: string) => api.addMember(projectId, email),
@@ -168,25 +175,26 @@ function InvitePopover({
   };
 
   return (
-    <div className="absolute right-0 top-[32px] z-20 w-72 rounded-md border border-border-1 bg-surface-1 p-3 shadow-lg">
+    <div>
       <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
         Invite collaborator
       </p>
       <form onSubmit={onSubmit} className="flex items-center gap-1.5">
-        <input
+        <Input
           ref={inputRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="Username"
-          className="flex-1 rounded border border-border-1 bg-surface-0 px-2 py-1 text-xs text-text-1 outline-none focus:border-text-5"
+          className="h-7 flex-1 border-border-1 bg-surface-0 px-2 py-1 text-xs shadow-none focus-visible:ring-0 focus-visible:border-text-5"
         />
-        <button
+        <Button
           type="submit"
+          size="sm"
           disabled={add.isPending}
-          className="rounded bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+          className="h-7 rounded bg-neutral-100 px-2.5 text-xs font-medium text-neutral-900 hover:bg-white"
         >
           Add
-        </button>
+        </Button>
       </form>
       {add.isError ? (
         <p className="mt-2 text-[11px] text-rose-400">

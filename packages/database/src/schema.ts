@@ -1104,7 +1104,16 @@ export const docs = pgTable(
     }),
     orderKey: text("order_key").notNull(),
     title: text("title").notNull(),
-    body: text("body"), // markdown
+    // Legacy markdown body. Preserved through Phase 1 rollout so a doc can be
+    // re-migrated if the parse improves; new writes go through `blocks`.
+    body: text("body"),
+    // Flipped on first read after migration-on-read (Phase 1 rewrite). Once true
+    // the block editor is the source of truth for content; `body` becomes cold.
+    migratedToBlocks: boolean("migrated_to_blocks").notNull().default(false),
+    // Optional single emoji shown in the sidebar tree + doc header.
+    icon: text("icon"),
+    // Optional cover image URL (uploaded via the shared R2 pipeline).
+    coverUrl: text("cover_url"),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -1126,6 +1135,64 @@ export const docs = pgTable(
       for: "all",
       using: memberOf(t.projectId),
       withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * blocks — typed content rows for the block-native doc editor. One doc has
+ * many blocks; each block is a database row so edits are surgical (single-row
+ * upserts) and out-of-band tools (search, indexing, refEmbed backfill) can
+ * work against structured content instead of parsing markdown.
+ *
+ * Content shape lives in `content` (jsonb) and `props` (jsonb); the concrete
+ * union is defined in packages/shared/src/dto.ts and validated at the API
+ * boundary before any write. The DB is intentionally schemaless on shape so
+ * new block types don't need a migration.
+ *
+ * Ordering is per (doc, parent) via a fractional index string. Nesting is
+ * shallow in practice (list items, callout children), but not capped in the
+ * schema — cycle prevention is enforced in the API on write.
+ *
+ * `version` bumps on every row update. Clients round-trip the version they
+ * last saw; a mismatch triggers a 409 so a stale tab can't clobber a fresh
+ * write from another tab or collaborator.
+ */
+export const blocks = pgTable(
+  "blocks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    docId: uuid("doc_id")
+      .notNull()
+      .references(() => docs.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id").references((): AnyPgColumn => blocks.id, {
+      onDelete: "cascade",
+    }),
+    position: text("position").notNull(),
+    type: text("type").notNull(),
+    content: jsonb("content").notNull(),
+    props: jsonb("props").notNull().default(sql`'{}'::jsonb`),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("blocks_doc_position_idx").on(t.docId, t.position),
+    index("blocks_doc_parent_position_idx").on(
+      t.docId,
+      t.parentId,
+      t.position,
+    ),
+    pgPolicy("blocks_member_rw", {
+      for: "all",
+      // Membership resolved via the parent doc's project. project_of_doc lives
+      // in functions.sql (SECURITY DEFINER) so a bare block row can gate on it.
+      using: sql`is_project_member(project_of_doc(${t.docId}))`,
+      withCheck: sql`is_project_member(project_of_doc(${t.docId}))`,
     }),
   ],
 ).enableRLS();

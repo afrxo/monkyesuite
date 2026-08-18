@@ -22,7 +22,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { marked } from "marked";
 import {
   type ChangeEvent,
-  type KeyboardEvent,
   type ReactNode,
   useEffect,
   useMemo,
@@ -38,6 +37,19 @@ import { relTime } from "../lib/format";
 import { AttachmentViewer } from "./AttachmentViewer";
 import { shortTaskId } from "./short-id";
 import { tagChipClass } from "./tag";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../components/ui/popover";
+import { Checkbox } from "../components/ui/checkbox";
 
 marked.use({ gfm: true, breaks: true, async: false });
 
@@ -68,73 +80,66 @@ export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
 
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
-  // Esc closes modal when viewer isn't up.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent | globalThis.KeyboardEvent) => {
-      if (e.key === "Escape" && viewerIndex === null) {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, viewerIndex]);
-
   const shortId = useMemo(
     () => shortTaskId(projectSlug, taskId),
     [projectSlug, taskId],
   );
 
-  const backdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
   return (
-    <div
-      onClick={backdropClick}
-      onKeyDown={() => {}}
-      role="presentation"
-      className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-10"
-      style={{ animation: "cardOverlayFade 120ms ease-out" }}
-    >
-      <div
-        className="grid w-full max-w-[920px] overflow-hidden rounded-lg border border-border-2 bg-surface-0 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)]"
-        style={{
-          maxHeight: "88vh",
-          gridTemplateColumns: "1fr 280px",
-          gridTemplateRows: "auto 1fr",
-          animation: "cardModalPop 160ms cubic-bezier(0.2,0.9,0.3,1.2)",
+    <>
+      <Dialog
+        open
+        onOpenChange={(o) => {
+          if (!o && viewerIndex === null) onClose();
         }}
       >
-        <Header
-          shortId={shortId}
-          task={detail.data?.task ?? null}
-          onClose={onClose}
-          taskId={taskId}
-        />
-        <div className="min-w-0 overflow-y-auto border-r border-border-1 px-7 py-6">
-          {detail.data ? (
-            <MainColumn
-              taskId={taskId}
-              detail={detail.data}
-              onOpenViewer={setViewerIndex}
-              invalidate={invalidate}
-            />
-          ) : (
-            <p className="text-xs text-text-disabled">Loading…</p>
-          )}
-        </div>
-        <aside className="flex flex-col gap-5 overflow-y-auto px-4 py-5">
-          {detail.data ? (
-            <SideColumn
-              taskId={taskId}
-              detail={detail.data}
-              milestones={milestones}
-              invalidate={invalidate}
-            />
-          ) : null}
-        </aside>
-      </div>
+        <DialogContent
+          showCloseButton={false}
+          onEscapeKeyDown={(e) => {
+            if (viewerIndex !== null) e.preventDefault();
+          }}
+          onPointerDownOutside={(e) => {
+            if (viewerIndex !== null) e.preventDefault();
+          }}
+          className="grid w-full max-w-[920px] overflow-hidden rounded-lg border border-border-2 bg-surface-0 p-0 gap-0 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] sm:max-w-[920px]"
+          style={{
+            maxHeight: "88vh",
+            gridTemplateColumns: "1fr 280px",
+            gridTemplateRows: "auto 1fr",
+            animation: "cardModalPop 160ms cubic-bezier(0.2,0.9,0.3,1.2)",
+          }}
+        >
+          <DialogTitle className="sr-only">Card details</DialogTitle>
+          <Header
+            shortId={shortId}
+            task={detail.data?.task ?? null}
+            onClose={onClose}
+            taskId={taskId}
+          />
+          <div className="min-w-0 overflow-y-auto border-r border-border-1 px-7 py-6">
+            {detail.data ? (
+              <MainColumn
+                taskId={taskId}
+                detail={detail.data}
+                onOpenViewer={setViewerIndex}
+                invalidate={invalidate}
+              />
+            ) : (
+              <p className="text-xs text-text-disabled">Loading…</p>
+            )}
+          </div>
+          <aside className="flex flex-col gap-5 overflow-y-auto px-4 py-5">
+            {detail.data ? (
+              <SideColumn
+                taskId={taskId}
+                detail={detail.data}
+                milestones={milestones}
+                invalidate={invalidate}
+              />
+            ) : null}
+          </aside>
+        </DialogContent>
+      </Dialog>
 
       {viewerIndex !== null && detail.data ? (
         <AttachmentViewer
@@ -144,7 +149,7 @@ export function CardModal({ taskId, projectSlug, milestones, onClose }: Props) {
           onClose={() => setViewerIndex(null)}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -471,19 +476,16 @@ function ChecklistRow({
       className="group -mx-2 flex items-center gap-2.5 rounded px-2 py-1.5 hover:bg-surface-hover"
       onDoubleClick={() => setEditing(true)}
     >
-      <button
-        type="button"
-        onClick={() => toggle.mutate()}
+      <Checkbox
+        checked={item.done}
+        onCheckedChange={() => toggle.mutate()}
         aria-label={item.done ? "Mark incomplete" : "Mark complete"}
-        className="grid h-3.5 w-3.5 flex-shrink-0 place-items-center rounded-[3px] border border-border-2 text-[10px]"
+        className="size-3.5 h-3.5 w-3.5 flex-shrink-0 rounded-[3px] border border-border-2 shadow-none transition-none data-[state=checked]:border-transparent data-[state=checked]:bg-transparent data-[state=checked]:text-[#1a1000] [&_svg]:size-2.5"
         style={{
           background: item.done ? "var(--accent-warm)" : "transparent",
           borderColor: item.done ? "var(--accent-warm)" : "var(--border-2)",
-          color: item.done ? "#1a1000" : "transparent",
         }}
-      >
-        <Icon name="check" size={9} />
-      </button>
+      />
       {editing ? (
         <input
           // biome-ignore lint/a11y/noAutofocus: focus what user opened
@@ -784,6 +786,7 @@ function CommentRow({
   );
   const { user } = useSession();
   const canDelete = !!user && user.id === comment.authorId;
+  const [confirming, setConfirming] = useState(false);
   const del = useMutation({
     mutationFn: () => api.deleteComment(comment.id),
     onSuccess: onChanged,
@@ -805,9 +808,7 @@ function CommentRow({
           {canDelete ? (
             <button
               type="button"
-              onClick={() => {
-                if (confirm("Delete this comment?")) del.mutate();
-              }}
+              onClick={() => setConfirming(true)}
               disabled={del.isPending}
               className="ml-auto grid h-5 w-5 place-items-center rounded text-text-disabled opacity-0 transition-colors group-hover:opacity-100 hover:text-rose-300"
               title="Delete comment"
@@ -822,6 +823,35 @@ function CommentRow({
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent className="max-w-sm sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete comment?</DialogTitle>
+          </DialogHeader>
+          <p className="text-[12px] text-text-3">
+            This action cannot be undone.
+          </p>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-[3px] px-2.5 py-[3px] text-[11px] font-medium text-text-3 hover:bg-surface-hover"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                del.mutate();
+                setConfirming(false);
+              }}
+              className="rounded-[3px] bg-destructive px-2.5 py-[3px] text-[11px] font-medium text-white"
+            >
+              Delete
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1051,85 +1081,71 @@ function MilestonePicker({
   pending: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
   const selected = milestones.find((m) => m.id === value) ?? null;
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: globalThis.KeyboardEvent) =>
-      e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div ref={wrapRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={pending}
-        className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] transition-colors hover:bg-surface-hover disabled:opacity-50 ${
-          selected ? "text-text-1" : "text-text-3"
-        }`}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={pending}
+          className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] transition-colors hover:bg-surface-hover disabled:opacity-50 ${
+            selected ? "text-text-1" : "text-text-3"
+          }`}
+        >
+          {selected ? (
+            <>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
+              {selected.name}
+            </>
+          ) : (
+            "— none —"
+          )}
+          <Icon name="chevron-down" size={9} className="ml-0.5 text-text-disabled" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={4}
+        className="w-52 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 py-1 text-text-1 shadow-xl"
       >
-        {selected ? (
-          <>
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
-            {selected.name}
-          </>
-        ) : (
-          "— none —"
-        )}
-        <Icon name="chevron-down" size={9} className="ml-0.5 text-text-disabled" />
-      </button>
-
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+4px)] z-30 w-52 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-xl">
+        <button
+          type="button"
+          onClick={() => {
+            onChange(null);
+            setOpen(false);
+          }}
+          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
+            value === null ? "text-text-1" : "text-text-3"
+          }`}
+        >
+          <span className="text-[9px] text-text-disabled opacity-0">●</span>
+          — none —
+          {value === null ? (
+            <span className="ml-auto"><Icon name="check" size={10} className="text-text-disabled" /></span>
+          ) : null}
+        </button>
+        {milestones.map((m) => (
           <button
+            key={m.id}
             type="button"
             onClick={() => {
-              onChange(null);
+              onChange(m.id);
               setOpen(false);
             }}
             className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
-              value === null ? "text-text-1" : "text-text-3"
+              value === m.id ? "text-text-1" : "text-text-3"
             }`}
           >
-            <span className="text-[9px] text-text-disabled opacity-0">●</span>
-            — none —
-            {value === null ? (
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
+            <span className="truncate">{m.name}</span>
+            {value === m.id ? (
               <span className="ml-auto"><Icon name="check" size={10} className="text-text-disabled" /></span>
             ) : null}
           </button>
-          {milestones.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => {
-                onChange(m.id);
-                setOpen(false);
-              }}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-white/[0.05] ${
-                value === m.id ? "text-text-1" : "text-text-3"
-              }`}
-            >
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-warm" />
-              <span className="truncate">{m.name}</span>
-              {value === m.id ? (
-                <span className="ml-auto"><Icon name="check" size={10} className="text-text-disabled" /></span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1147,27 +1163,11 @@ function AssigneePicker({
   pending: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
   const members = useQuery({
     queryKey: ["members", projectId],
     queryFn: () => api.members(projectId),
     enabled: open,
   });
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: globalThis.KeyboardEvent) =>
-      e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   const selected = new Set(value);
   const toggle = (uid: string) => {
@@ -1178,44 +1178,49 @@ function AssigneePicker({
   };
 
   return (
-    <div ref={wrapRef} className="relative flex-1">
-      <div className="flex flex-wrap items-center gap-1">
-        {current.length === 0 ? (
-          <span className="text-[12px] text-text-3">unassigned</span>
-        ) : (
-          current.map((a) => (
-            <span
-              key={a.id}
-              className="inline-flex items-center gap-1 rounded-[8px] bg-surface-hover px-1.5 py-px text-[11px] text-text-1"
-              title={a.email}
-            >
-              {a.name ?? a.email}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggle(a.id);
-                }}
-                className="opacity-60 hover:opacity-100"
-                aria-label={`Remove ${a.name ?? a.email}`}
+    <Popover open={open} onOpenChange={setOpen}>
+      <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-1">
+          {current.length === 0 ? (
+            <span className="text-[12px] text-text-3">unassigned</span>
+          ) : (
+            current.map((a) => (
+              <span
+                key={a.id}
+                className="inline-flex items-center gap-1 rounded-[8px] bg-surface-hover px-1.5 py-px text-[11px] text-text-1"
+                title={a.email}
               >
-                <Icon name="x" size={9} />
-              </button>
-            </span>
-          ))
-        )}
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          disabled={pending}
-          className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1 disabled:opacity-50"
-        >
-          + assign
-        </button>
-      </div>
+                {a.name ?? a.email}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggle(a.id);
+                  }}
+                  className="opacity-60 hover:opacity-100"
+                  aria-label={`Remove ${a.name ?? a.email}`}
+                >
+                  <Icon name="x" size={9} />
+                </button>
+              </span>
+            ))
+          )}
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              disabled={pending}
+              className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1 disabled:opacity-50"
+            >
+              + assign
+            </button>
+          </PopoverTrigger>
+        </div>
 
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-30 w-56 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-xl">
+        <PopoverContent
+          align="start"
+          sideOffset={6}
+          className="w-56 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 py-1 text-text-1 shadow-xl"
+        >
           {members.isPending ? (
             <div className="px-3 py-2 text-[11px] text-text-disabled">
               Loading…
@@ -1245,9 +1250,9 @@ function AssigneePicker({
               </button>
             ))
           )}
-        </div>
-      ) : null}
-    </div>
+        </PopoverContent>
+      </div>
+    </Popover>
   );
 }
 
@@ -1263,7 +1268,7 @@ function TagsPicker({
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ProjectTag | null>(null);
   const vocab = useQuery({
     queryKey: ["project-tags", task.projectId],
     queryFn: () => api.projectTags(task.projectId),
@@ -1306,21 +1311,6 @@ function TagsPicker({
     onError: (err) => toastError(err),
   });
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: globalThis.KeyboardEvent) =>
-      e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const applied = new Set((task.tags ?? []).map((t) => t.id));
   const query = q.trim();
   const matches = (vocab.data ?? []).filter((t) =>
@@ -1331,38 +1321,43 @@ function TagsPicker({
   );
 
   return (
-    <div ref={wrapRef} className="relative flex-1">
-      <div className="flex flex-wrap items-center gap-1">
-        {(task.tags ?? []).map((tag) => (
-          <span
-            key={tag.id}
-            className={`inline-flex items-center gap-1 rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
-          >
-            {tag.name}
+    <Popover open={open} onOpenChange={setOpen}>
+      <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-1">
+          {(task.tags ?? []).map((tag) => (
+            <span
+              key={tag.id}
+              className={`inline-flex items-center gap-1 rounded-[8px] px-1.5 py-px text-[10px] tracking-[0.04em] ${tagChipClass(tag)}`}
+            >
+              {tag.name}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  remove.mutate(tag.id);
+                }}
+                className="opacity-60 hover:opacity-100"
+                aria-label={`Remove ${tag.name}`}
+              >
+                <Icon name="x" size={9} />
+              </button>
+            </span>
+          ))}
+          <PopoverTrigger asChild>
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                remove.mutate(tag.id);
-              }}
-              className="opacity-60 hover:opacity-100"
-              aria-label={`Remove ${tag.name}`}
+              className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1"
             >
-              <Icon name="x" size={9} />
+              + tag
             </button>
-          </span>
-        ))}
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded border border-dashed border-border-2 px-1.5 py-px text-[10px] text-text-disabled hover:text-text-1"
-        >
-          + tag
-        </button>
-      </div>
+          </PopoverTrigger>
+        </div>
 
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-30 w-64 overflow-hidden rounded-md border border-border-1 bg-surface-1 shadow-xl">
+        <PopoverContent
+          align="start"
+          sideOffset={6}
+          className="w-64 overflow-hidden rounded-md border border-border-1 bg-surface-1 p-0 text-text-1 shadow-xl"
+        >
           <input
             // biome-ignore lint/a11y/noAutofocus: focus what user opened
             autoFocus
@@ -1397,15 +1392,7 @@ function TagsPicker({
                     else apply.mutate(tag.id);
                   }}
                   onRename={(name) => rename.mutate({ id: tag.id, name })}
-                  onDelete={() => {
-                    if (
-                      confirm(
-                        `Delete "${tag.name}"? It will be removed from every card in this project.`,
-                      )
-                    ) {
-                      del.mutate(tag.id);
-                    }
-                  }}
+                  onDelete={() => setConfirmDelete(tag)}
                 />
               ))
             )}
@@ -1420,9 +1407,48 @@ function TagsPicker({
               </button>
             ) : null}
           </div>
-        </div>
-      ) : null}
-    </div>
+        </PopoverContent>
+      </div>
+
+      <Dialog
+        open={confirmDelete !== null}
+        onOpenChange={(o) => {
+          if (!o) setConfirmDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-sm sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete tag?</DialogTitle>
+          </DialogHeader>
+          <p className="text-[12px] text-text-3">
+            {confirmDelete
+              ? `Delete "${confirmDelete.name}"? It will be removed from every card in this project.`
+              : null}
+          </p>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(null)}
+              className="rounded-[3px] px-2.5 py-[3px] text-[11px] font-medium text-text-3 hover:bg-surface-hover"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmDelete) {
+                  del.mutate(confirmDelete.id);
+                  setConfirmDelete(null);
+                }
+              }}
+              className="rounded-[3px] bg-destructive px-2.5 py-[3px] text-[11px] font-medium text-white"
+            >
+              Delete
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Popover>
   );
 }
 

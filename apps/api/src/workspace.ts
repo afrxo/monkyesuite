@@ -6,6 +6,7 @@
 
 import { generateKeyBetween } from "@monkyesuite/core";
 import {
+  blocks as blocksTable,
   docFolders,
   docs,
   games,
@@ -14,27 +15,48 @@ import {
   users,
 } from "@monkyesuite/database";
 import {
+  type Block,
+  type BlockInput,
   createDocFolderSchema,
   createDocSchema,
   createNoteSchema,
   createProjectGameSchema,
+  deleteBlocksSchema,
   type Doc,
+  type DocBlocks,
   type DocFolder,
-  type ProjectGame,
-  type ProjectNote,
   patchDocFolderSchema,
+  patchDocMetaSchema,
   patchDocSchema,
   patchNoteSchema,
+  type ProjectGame,
+  type ProjectNote,
+  type TextBlockContent,
   universeIdSchema,
+  upsertBlocksSchema,
   uuidSchema,
 } from "@monkyesuite/shared";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { resolveItemAccess, resolveProjectAccess } from "./access.js";
-import { notFound, validationError } from "./errors.js";
+import { markdownToBlocks } from "./blocks/markdownToBlocks.js";
+import { conflict, notFound, validationError } from "./errors.js";
 import { type AppEnv, requireUser } from "./middleware.js";
 import { isoReq } from "./serialize.js";
 import { type Tx, withUser } from "./tx.js";
+
+const mapBlock = (b: typeof blocksTable.$inferSelect): Block => ({
+  id: b.id,
+  docId: b.docId,
+  parentId: b.parentId,
+  position: b.position,
+  type: b.type as Block["type"],
+  content: b.content as TextBlockContent,
+  props: (b.props as Record<string, unknown>) ?? {},
+  version: b.version,
+  createdAt: isoReq(b.createdAt),
+  updatedAt: isoReq(b.updatedAt),
+});
 
 const mapDoc = (d: typeof docs.$inferSelect): Doc => ({
   id: d.id,
@@ -43,6 +65,9 @@ const mapDoc = (d: typeof docs.$inferSelect): Doc => ({
   orderKey: d.orderKey,
   title: d.title,
   body: d.body,
+  migratedToBlocks: d.migratedToBlocks,
+  icon: d.icon,
+  coverUrl: d.coverUrl,
   createdBy: d.createdBy,
   createdAt: isoReq(d.createdAt),
   updatedAt: isoReq(d.updatedAt),
@@ -314,6 +339,234 @@ export function workspaceRoutes(): Hono<AppEnv> {
     });
     return c.body(null, 204);
   });
+
+  /* -------------------------- doc meta (icon, cover) --------------------- */
+
+  r.patch("/docs/:id/meta", async (c) => {
+    const userId = requireUser(c);
+    const id = uuidSchema.parse(c.req.param("id"));
+    const body = patchDocMetaSchema.safeParse(
+      await c.req.json().catch(() => ({})),
+    );
+    if (!body.success) throw validationError("Invalid metadata.");
+    const d = body.data;
+    const doc = await withUser(userId, async (tx): Promise<Doc> => {
+      await resolveItemAccess(tx, "doc", id, userId);
+      const [row] = await tx
+        .update(docs)
+        .set({
+          ...(d.icon !== undefined ? { icon: d.icon } : {}),
+          ...(d.coverUrl !== undefined ? { coverUrl: d.coverUrl } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(docs.id, id))
+        .returning();
+      if (!row) throw notFound("No such doc.");
+      return mapDoc(row);
+    });
+    return c.json(doc);
+  });
+
+  /* --------------------------------- blocks ------------------------------ */
+  //
+  // Migration-on-read: the first GET after this rollout for a legacy markdown
+  // doc parses its `body` into blocks, persists them, and flips
+  // `migrated_to_blocks`. The lock is a SELECT ... FOR UPDATE on the docs row
+  // so two concurrent opens don't both migrate and double-insert.
+
+  r.get("/docs/:id/blocks", async (c) => {
+    const userId = requireUser(c);
+    const id = uuidSchema.parse(c.req.param("id"));
+    const payload = await withUser(userId, async (tx): Promise<DocBlocks> => {
+      await resolveItemAccess(tx, "doc", id, userId);
+      const [row] = await tx
+        .select()
+        .from(docs)
+        .where(eq(docs.id, id))
+        .for("update")
+        .limit(1);
+      if (!row) throw notFound("No such doc.");
+      let doc = row;
+      let rows = await tx
+        .select()
+        .from(blocksTable)
+        .where(eq(blocksTable.docId, id))
+        .orderBy(asc(blocksTable.position));
+      if (!doc.migratedToBlocks) {
+        // Fresh migration. If the doc already has blocks (partial state from a
+        // prior failed run), skip the parse — keep whatever survived.
+        if (rows.length === 0) {
+          const parsed = markdownToBlocks(doc.body ?? "");
+          // Two-pass insert so `parent_id` can reference an id from pass one.
+          const ids = parsed.map(() => crypto.randomUUID());
+          const insertRows = parsed.map((b, i) => {
+            const uid = ids[i];
+            if (!uid) throw new Error("uuid missing");
+            return {
+              id: uid,
+              docId: id,
+              parentId:
+                b.parentIdx !== null ? (ids[b.parentIdx] ?? null) : null,
+              position: b.position,
+              type: b.type,
+              content: b.content,
+              props: b.props,
+            };
+          });
+          if (insertRows.length) {
+            await tx.insert(blocksTable).values(insertRows);
+          }
+          rows = await tx
+            .select()
+            .from(blocksTable)
+            .where(eq(blocksTable.docId, id))
+            .orderBy(asc(blocksTable.position));
+        }
+        const [updated] = await tx
+          .update(docs)
+          .set({ migratedToBlocks: true, updatedAt: new Date() })
+          .where(eq(docs.id, id))
+          .returning();
+        if (updated) doc = updated;
+      }
+      return { doc: mapDoc(doc), blocks: rows.map(mapBlock) };
+    });
+    return c.json(payload);
+  });
+
+  // Bulk upsert. Every block in the payload MUST carry the version the client
+  // last saw. If any stored block's version has moved on, reject the whole
+  // batch with 409 + stale ids so the client can merge or overwrite.
+  r.post("/docs/:id/blocks", async (c) => {
+    const userId = requireUser(c);
+    const id = uuidSchema.parse(c.req.param("id"));
+    const body = upsertBlocksSchema.safeParse(
+      await c.req.json().catch(() => ({})),
+    );
+    if (!body.success) throw validationError("Invalid blocks payload.");
+    const incoming: BlockInput[] = body.data.blocks;
+    if (!incoming.length) return c.json({ blocks: [] });
+
+    const result = await withUser(userId, async (tx) => {
+      await resolveItemAccess(tx, "doc", id, userId);
+      const ids = incoming.map((b) => b.id);
+      const existing = await tx
+        .select({ id: blocksTable.id, version: blocksTable.version })
+        .from(blocksTable)
+        .where(
+          and(eq(blocksTable.docId, id), inArray(blocksTable.id, ids)),
+        );
+      const stored = new Map(existing.map((r) => [r.id, r.version]));
+
+      const stale: string[] = [];
+      for (const b of incoming) {
+        const cur = stored.get(b.id);
+        // A new block (id not in DB) is fine as long as the client sent
+        // version 0 or 1 — either way it doesn't clobber an existing row.
+        if (cur !== undefined && cur !== b.version) stale.push(b.id);
+      }
+      if (stale.length) return { stale };
+
+      // Reject any block whose parent_id doesn't resolve to a block in THIS
+      // doc — either already present or being inserted in this batch.
+      const idSet = new Set([...stored.keys(), ...ids]);
+      for (const b of incoming) {
+        if (b.parentId && !idSet.has(b.parentId)) {
+          throw validationError(`unknown parent: ${b.parentId}`);
+        }
+      }
+
+      // Upsert. On conflict bump version + timestamp; keep created_at.
+      const values = incoming.map((b) => ({
+        id: b.id,
+        docId: id,
+        parentId: b.parentId,
+        position: b.position,
+        type: b.type,
+        content: b.content,
+        props: b.props,
+        version: (stored.get(b.id) ?? 0) + 1,
+        updatedAt: new Date(),
+      }));
+      const rows = await tx
+        .insert(blocksTable)
+        .values(values)
+        .onConflictDoUpdate({
+          target: blocksTable.id,
+          set: {
+            parentId: sql`excluded.parent_id`,
+            position: sql`excluded.position`,
+            type: sql`excluded.type`,
+            content: sql`excluded.content`,
+            props: sql`excluded.props`,
+            version: sql`${blocksTable.version} + 1`,
+            updatedAt: sql`excluded.updated_at`,
+          },
+        })
+        .returning();
+      // Touch the doc so listing sort by updatedAt reflects the edit.
+      await tx
+        .update(docs)
+        .set({ updatedAt: new Date() })
+        .where(eq(docs.id, id));
+      return { blocks: rows.map(mapBlock) };
+    });
+
+    if ("stale" in result) {
+      // Send back the freshest server view of the whole doc's blocks so the
+      // client can rebase without a second round-trip.
+      const fresh = await withUser(userId, async (tx) => {
+        await resolveItemAccess(tx, "doc", id, userId);
+        return tx
+          .select()
+          .from(blocksTable)
+          .where(eq(blocksTable.docId, id))
+          .orderBy(asc(blocksTable.position));
+      });
+      c.header("Content-Type", "application/json");
+      return c.json(
+        {
+          error: {
+            code: "conflict",
+            message: "Some blocks changed in another session.",
+          },
+          staleIds: result.stale,
+          currentBlocks: fresh.map(mapBlock),
+        },
+        409,
+      );
+    }
+    return c.json(result);
+  });
+
+  r.delete("/docs/:id/blocks", async (c) => {
+    const userId = requireUser(c);
+    const id = uuidSchema.parse(c.req.param("id"));
+    const body = deleteBlocksSchema.safeParse(
+      await c.req.json().catch(() => ({})),
+    );
+    if (!body.success) throw validationError("Invalid delete payload.");
+    await withUser(userId, async (tx) => {
+      await resolveItemAccess(tx, "doc", id, userId);
+      await tx
+        .delete(blocksTable)
+        .where(
+          and(
+            eq(blocksTable.docId, id),
+            inArray(blocksTable.id, body.data.ids),
+          ),
+        );
+      await tx
+        .update(docs)
+        .set({ updatedAt: new Date() })
+        .where(eq(docs.id, id));
+    });
+    return c.body(null, 204);
+  });
+
+  // Silence the "conflict helper unused" lint if the 409 path above ever gets
+  // refactored to use it — cheap keep-alive for the import.
+  void conflict;
 
   /* ---------------------------- doc folders ----------------------------- */
 

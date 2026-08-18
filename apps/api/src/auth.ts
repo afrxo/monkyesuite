@@ -36,11 +36,10 @@ export const auth = betterAuth({
   // localhost still works.
   advanced: {
     useSecureCookies: process.env.NODE_ENV === "production",
-    defaultCookieAttributes: {
-      sameSite: "none",
-      secure: true,
-      partitioned: true,
-    },
+    defaultCookieAttributes:
+      process.env.NODE_ENV === "production"
+        ? { sameSite: "none", secure: true, partitioned: true }
+        : { sameSite: "lax", secure: false },
   },
   // 30-day sessions, slide the expiry forward whenever we've seen the user in
   // the last day. Better Auth's defaults are 7d / 1d refresh, which felt like

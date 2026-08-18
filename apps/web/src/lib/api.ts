@@ -5,7 +5,11 @@
 import type {
   AttachmentUploadTicket,
   AttachmentViewTicket,
+  Block,
+  BlockInput,
   Board,
+  DocBlocks,
+  PatchDocMetaInput,
   CreateChecklistItemInput,
   CreateCommentInput,
   CreateDocFolderInput,
@@ -226,6 +230,16 @@ export const api = {
   patchDoc: (docId: string, input: PatchDocInput) =>
     patch<Doc>(`/docs/${docId}`, input),
   deleteDoc: (docId: string) => del(`/docs/${docId}`),
+
+  patchDocMeta: (docId: string, input: PatchDocMetaInput) =>
+    patch<Doc>(`/docs/${docId}/meta`, input),
+
+  // Blocks (Phase 1 block-native editor).
+  docBlocks: (docId: string) => get<DocBlocks>(`/docs/${docId}/blocks`),
+  upsertBlocks: (docId: string, blocks: BlockInput[]) =>
+    post<{ blocks: Block[] }>(`/docs/${docId}/blocks`, { blocks }),
+  deleteBlocks: (docId: string, ids: string[]) =>
+    request<void>("DELETE", `/docs/${docId}/blocks`, { ids }),
 
   // Doc folders.
   docFolders: (id: string) => get<DocFolder[]>(`/projects/${id}/doc-folders`),

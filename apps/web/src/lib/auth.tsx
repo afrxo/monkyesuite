@@ -27,8 +27,8 @@ export function useSession(): {
 export function useSignIn() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { email: string; password: string }) =>
-      authClient.signIn(v.email, v.password),
+    mutationFn: (v: { username: string; password: string }) =>
+      authClient.signIn(v.username, v.password),
     onSuccess: (user) => qc.setQueryData(SESSION_KEY, user),
   });
 }

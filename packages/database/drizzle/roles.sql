@@ -92,6 +92,7 @@ grant select, insert, update, delete on
   task_assignees,
   doc_folders,
   docs,
+  blocks,
   notes,
   project_game,
   game_notes,

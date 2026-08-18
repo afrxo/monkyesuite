@@ -252,6 +252,109 @@ export const patchDocFolderSchema = z
   .refine((v) => Object.keys(v).length > 0, "no fields to update");
 export type PatchDocFolderInput = z.infer<typeof patchDocFolderSchema>;
 
+/* ---------------------------------- blocks -------------------------------- */
+
+// Inline runs — the leaves of a text-bearing block's content. `link` is a bare
+// URL string; anchor text lives in `text` (matches BlockNote's inline model).
+const inlineRunSchema = z.object({
+  text: z.string(),
+  bold: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  code: z.boolean().optional(),
+  strikethrough: z.boolean().optional(),
+  link: z.string().url().optional(),
+});
+const textContentSchema = z.object({
+  runs: z.array(inlineRunSchema).max(500),
+});
+
+// Per-type props. Heading level clamped to 1..3; check items carry `checked`.
+// Everything else props-empty for Phase 1.
+const emptyProps = z.object({}).strict();
+const headingProps = z.object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]) }).strict();
+const checkProps = z.object({ checked: z.boolean() }).strict();
+
+// Validated block-input schema (used by upsert). Discriminated on `type` so
+// wrong-shape blocks are rejected before touching the DB.
+export const blockInputSchema = z.discriminatedUnion("type", [
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("paragraph"),
+    content: textContentSchema,
+    props: emptyProps,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("heading"),
+    content: textContentSchema,
+    props: headingProps,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("bulletListItem"),
+    content: textContentSchema,
+    props: emptyProps,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("numberedListItem"),
+    content: textContentSchema,
+    props: emptyProps,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("checkListItem"),
+    content: textContentSchema,
+    props: checkProps,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    parentId: z.string().uuid().nullable(),
+    position: z.string().min(1).max(1024),
+    version: z.number().int().nonnegative(),
+    type: z.literal("quote"),
+    content: textContentSchema,
+    props: emptyProps,
+  }),
+]);
+export type BlockInput = z.infer<typeof blockInputSchema>;
+
+// Bulk upsert payload. Bounded at 1000 blocks per request — a doc that big
+// signals a UI problem, not a real user's writing.
+export const upsertBlocksSchema = z.object({
+  blocks: z.array(blockInputSchema).max(1000),
+});
+export type UpsertBlocksInput = z.infer<typeof upsertBlocksSchema>;
+
+export const deleteBlocksSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(1000),
+});
+export type DeleteBlocksInput = z.infer<typeof deleteBlocksSchema>;
+
+// Doc metadata patch — icon + cover. Title lives in patchDocSchema above.
+export const patchDocMetaSchema = z
+  .object({
+    icon: z.string().max(16).nullable().optional(),
+    coverUrl: z.string().url().nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, "no fields to update");
+export type PatchDocMetaInput = z.infer<typeof patchDocMetaSchema>;
+
 /* --------------------------- project-note writes -------------------------- */
 
 // A short pin needs at least a title or a body — not an empty row.

@@ -426,9 +426,58 @@ export interface Doc {
   orderKey: string;
   title: string;
   body: string | null;
+  migratedToBlocks: boolean;
+  icon: string | null;
+  coverUrl: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/* -------------------------------- blocks --------------------------------- */
+
+// Inline runs inside a text-bearing block. `link` collapses to plain if empty.
+export interface InlineRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  code?: boolean;
+  strikethrough?: boolean;
+  link?: string;
+}
+
+export interface TextBlockContent {
+  runs: InlineRun[];
+}
+
+export type BlockType =
+  | "paragraph"
+  | "heading"
+  | "bulletListItem"
+  | "numberedListItem"
+  | "checkListItem"
+  | "quote";
+
+// The DB envelope. `content` and `props` shapes are enforced at the API
+// boundary; storing them as jsonb keeps new block types migration-free.
+export interface Block {
+  id: string;
+  docId: string;
+  parentId: string | null;
+  position: string;
+  type: BlockType;
+  content: TextBlockContent;
+  props: Record<string, unknown>;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Server response for GET /docs/:id/blocks — the doc envelope + its blocks in
+// order. Client rebuilds the tree via parent_id + position.
+export interface DocBlocks {
+  doc: Doc;
+  blocks: Block[];
 }
 
 export interface DocFolder {

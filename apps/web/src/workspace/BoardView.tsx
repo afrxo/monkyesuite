@@ -18,13 +18,18 @@ import {
   type DragEvent,
   type FormEvent,
   forwardRef,
-  useEffect,
   useImperativeHandle,
   useRef,
   useState,
 } from "react";
 import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import { api } from "../lib/api";
 import { milestoneColor } from "./milestone-color";
 import { shortTaskId } from "./short-id";
@@ -602,7 +607,6 @@ function CardMenu({
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
 
   const archive = useMutation({
@@ -666,86 +670,59 @@ function CardMenu({
     onSettled: onChanged,
   });
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const isArchived = task.status === "archived";
 
   return (
-    <div ref={wrapRef} className="absolute right-1.5 top-1.5">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        aria-label="Card actions"
-        className={`grid h-6 w-6 place-items-center rounded text-text-disabled transition-colors ${
-          open
-            ? "bg-white/[0.06] text-text-1 opacity-100"
-            : "opacity-0 hover:bg-white/[0.06] hover:text-text-1 group-hover:opacity-100 focus:opacity-100"
-        }`}
-      >
-        <Icon name="more" size={14} />
-      </button>
-      {open ? (
-        <div className="absolute right-0 top-7 z-10 w-40 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
+    <div className="absolute right-1.5 top-1.5">
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            aria-label="Card actions"
+            className={`grid h-6 w-6 place-items-center rounded text-text-disabled transition-colors ${
+              open
+                ? "bg-white/[0.06] text-text-1 opacity-100"
+                : "opacity-0 hover:bg-white/[0.06] hover:text-text-1 group-hover:opacity-100 focus:opacity-100"
+            }`}
+          >
+            <Icon name="more" size={14} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          sideOffset={4}
+          onClick={(e) => e.stopPropagation()}
+          className="w-40 overflow-hidden rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg"
+        >
           {isArchived ? (
-            <MenuItem onClick={() => restore.mutate()}>
+            <DropdownMenuItem
+              onSelect={() => restore.mutate()}
+              className="block w-full px-3 py-2 text-left text-xs text-text-2 hover:bg-white/[0.05] focus:bg-white/[0.05] transition-colors"
+            >
               Restore to Backlog
-            </MenuItem>
+            </DropdownMenuItem>
           ) : (
-            <MenuItem onClick={() => archive.mutate()}>Archive</MenuItem>
+            <DropdownMenuItem
+              onSelect={() => archive.mutate()}
+              className="block w-full px-3 py-2 text-left text-xs text-text-2 hover:bg-white/[0.05] focus:bg-white/[0.05] transition-colors"
+            >
+              Archive
+            </DropdownMenuItem>
           )}
-          <MenuItem
-            danger
-            onClick={() => {
+          <DropdownMenuItem
+            onSelect={() => {
               if (confirm(`Delete card "${task.title}"? This can't be undone.`))
                 del.mutate();
             }}
+            className="block w-full px-3 py-2 text-left text-xs text-destructive hover:bg-white/[0.05] focus:bg-white/[0.05] transition-colors"
           >
             Delete
-          </MenuItem>
-        </div>
-      ) : null}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
-  );
-}
-
-function MenuItem({
-  children,
-  onClick,
-  danger,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className={`block w-full px-3 py-2 text-left text-xs hover:bg-white/[0.05] transition-colors ${
-        danger ? "text-destructive" : "text-text-2"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
