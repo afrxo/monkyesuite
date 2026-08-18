@@ -64,6 +64,7 @@ import {
   extractRobloxUniverseId,
   refEmbedBlockSpec,
 } from "./customBlocks";
+import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
 import { DocCover } from "./DocCover";
 import { DocIcon } from "./DocIcon";
 import { DocOutline } from "./DocOutline";
@@ -218,6 +219,7 @@ function Editor({
   );
   const [showRecover, setShowRecover] = useState<Draft | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const skipNext = useRef(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -684,6 +686,7 @@ function Editor({
             editor={editor}
             theme="dark"
             formattingToolbar={false}
+            emojiPicker={false}
           >
             <FormattingToolbarController
               formattingToolbar={() => (
@@ -701,6 +704,7 @@ function Editor({
                     ...getDefaultReactSlashMenuItems(editor),
                     ...calloutSlashItems(editor),
                     refEmbedSlashItem(editor, projectId),
+                    emojiSlashItem(() => setShowEmojiPicker(true)),
                   ],
                   query,
                 )
@@ -713,6 +717,17 @@ function Editor({
 
       {showShortcuts ? (
         <ShortcutSheet onClose={() => setShowShortcuts(false)} />
+      ) : null}
+      {showEmojiPicker ? (
+        <EmojiInsertOverlay
+          onClose={() => setShowEmojiPicker(false)}
+          onPick={(emoji) => {
+            editor.insertInlineContent([
+              { type: "text", text: emoji, styles: {} },
+            ]);
+            setShowEmojiPicker(false);
+          }}
+        />
       ) : null}
       {lightbox}
     </div>
@@ -1025,6 +1040,49 @@ function calloutSlashItems(editor: BNEditor) {
     },
   });
   return [insert("note"), insert("tip"), insert("warning"), insert("danger")];
+}
+
+function emojiSlashItem(open: () => void) {
+  return {
+    title: "Emoji",
+    aliases: ["emoji", ":", "smile"],
+    group: "Other",
+    subtext: "Insert an emoji",
+    onItemClick: () => open(),
+  };
+}
+
+function EmojiInsertOverlay({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (emoji: string) => void;
+}) {
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm"
+    >
+      <div
+        // biome-ignore lint/a11y/noStaticElementInteractions: stop bubble
+        onClick={(e) => e.stopPropagation()}
+        className="rounded-md border border-border-1 bg-surface-1 shadow-xl"
+      >
+        <EmojiPicker
+          theme={Theme.DARK}
+          emojiStyle={EmojiStyle.NATIVE}
+          skinTonesDisabled
+          searchPlaceHolder="Search"
+          width={340}
+          height={380}
+          previewConfig={{ showPreview: false }}
+          onEmojiClick={(e) => onPick(e.emoji)}
+        />
+      </div>
+    </div>
+  );
 }
 
 function refEmbedSlashItem(editor: BNEditor, projectId: string) {
