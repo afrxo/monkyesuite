@@ -3,3 +3,4 @@
 // single-row reorder math has one home (specs/05 §5.2).
 
 export { generateKeyBetween, generateNKeysBetween } from "./order-key.js";
+export * from "./finance.js";

@@ -82,7 +82,10 @@ type ScopedItem =
   | "doc"
   | "note"
   | "projectTag"
-  | "docFolder";
+  | "docFolder"
+  | "financeTx"
+  | "financePerson"
+  | "financeSplit";
 const RESOLVER: Record<ScopedItem, string> = {
   task: "project_of_task",
   milestone: "project_of_milestone",
@@ -90,6 +93,9 @@ const RESOLVER: Record<ScopedItem, string> = {
   note: "project_of_note",
   projectTag: "project_of_project_tag",
   docFolder: "project_of_doc_folder",
+  financeTx: "project_of_finance_tx",
+  financePerson: "project_of_finance_person",
+  financeSplit: "project_of_finance_split",
 };
 
 export async function projectOfItem(

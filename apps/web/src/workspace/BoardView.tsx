@@ -19,6 +19,7 @@ import {
   type FormEvent,
   Fragment,
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -32,10 +33,11 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { api } from "../lib/api";
+import { FinancesView } from "./FinancesView";
 import { ListView } from "./ListView/ListView";
-import { TimelineView } from "./TimelineView";
 import { milestoneColor } from "./milestone-color";
 import { shortTaskId } from "./short-id";
+import { TimelineView } from "./TimelineView";
 import { tagChipClass } from "./tag";
 import { matchesTaskFilter } from "./taskFilter";
 
@@ -73,6 +75,9 @@ type Props = {
   // Which card the URL currently has open (null when the modal is closed). Only
   // List needs it — to restore row focus when the modal closes.
   openCardTaskId?: string | null;
+  // Reports the active view up so the workspace can react (e.g. hide the notes
+  // rail on the Finances tab, which has its own full-width layout).
+  onViewChange?: (view: "board" | "list" | "timeline" | "finances") => void;
 };
 
 // --- optimistic helpers ---
@@ -140,6 +145,7 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
     onChanged,
     onOpenCard,
     openCardTaskId = null,
+    onViewChange,
   },
   ref,
 ) {
@@ -159,7 +165,12 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
     setDragHeight(null);
     setDropTarget(null);
   };
-  const [view, setView] = useState<"board" | "list" | "timeline">("board");
+  const [view, setView] = useState<"board" | "list" | "timeline" | "finances">(
+    "board",
+  );
+  useEffect(() => {
+    onViewChange?.(view);
+  }, [view, onViewChange]);
   const [query, setQuery] = useState("");
   const [addingIn, setAddingIn] = useState<TaskStatus | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -289,46 +300,56 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
           >
             Timeline
           </ViewTab>
+          <ViewTab
+            active={view === "finances"}
+            onClick={() => setView("finances")}
+          >
+            Finances
+          </ViewTab>
         </div>
         <div className="flex-1" />
-        <button
-          type="button"
-          onClick={() => setShowArchived((v) => !v)}
-          className={`rounded border px-3 py-1.5 text-xs transition-colors ${
-            showArchived
-              ? "border-border-2 bg-white/[0.05] text-text-1"
-              : "border-border-2 text-text-3 hover:text-text-1"
-          }`}
-          title="Toggle archived lane"
-        >
-          Archived
-          <span className="ml-1.5 font-mono text-[11px] text-text-disabled">
-            {archivedCount}
-          </span>
-        </button>
-        <label className="hidden w-60 items-center gap-2 rounded border border-border-1 bg-surface-1 px-2.5 py-1.5 text-xs text-text-3 sm:flex">
-          <Icon
-            name="search"
-            size={14}
-            className="shrink-0 text-text-disabled"
-          />
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setQuery("");
-            }}
-            placeholder="Filter cards…"
-            className="flex-1 bg-transparent text-xs text-text-1 outline-none placeholder:text-text-disabled"
-          />
-          <span className="rounded border border-border-1 px-1.5 py-px font-mono text-[11px] text-text-disabled">
-            ⌘K
-          </span>
-        </label>
+        {view === "finances" ? null : (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowArchived((v) => !v)}
+              className={`rounded border px-3 py-1.5 text-xs transition-colors ${
+                showArchived
+                  ? "border-border-2 bg-white/[0.05] text-text-1"
+                  : "border-border-2 text-text-3 hover:text-text-1"
+              }`}
+              title="Toggle archived lane"
+            >
+              Archived
+              <span className="ml-1.5 font-mono text-[11px] text-text-disabled">
+                {archivedCount}
+              </span>
+            </button>
+            <label className="hidden w-60 items-center gap-2 rounded border border-border-1 bg-surface-1 px-2.5 py-1.5 text-xs text-text-3 sm:flex">
+              <Icon
+                name="search"
+                size={14}
+                className="shrink-0 text-text-disabled"
+              />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setQuery("");
+                }}
+                placeholder="Filter cards…"
+                className="flex-1 bg-transparent text-xs text-text-1 outline-none placeholder:text-text-disabled"
+              />
+              <span className="rounded border border-border-1 px-1.5 py-px font-mono text-[11px] text-text-disabled">
+                ⌘K
+              </span>
+            </label>
+          </>
+        )}
       </div>
 
-      {tagVocab.length > 0 ? (
+      {view !== "finances" && tagVocab.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-border-1 bg-surface-0 px-5 py-2">
           <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
             Tags
@@ -366,7 +387,9 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
         </div>
       ) : null}
 
-      {view === "timeline" ? (
+      {view === "finances" ? (
+        <FinancesView projectId={projectId} />
+      ) : view === "timeline" ? (
         <TimelineView
           board={board}
           projectId={projectId}

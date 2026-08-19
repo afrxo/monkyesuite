@@ -68,6 +68,7 @@ import {
   toHttpError,
   validationError,
 } from "./errors.js";
+import { financeRoutes } from "./finances.js";
 import { gameNoteRoutes } from "./gamenotes.js";
 import { type AppEnv, requireUser, resolveSession } from "./middleware.js";
 import { scopedRoutes } from "./scoped.js";
@@ -364,6 +365,7 @@ export function createApp() {
   scoped.route("/", gameNoteRoutes());
   scoped.route("/", tagRoutes());
   scoped.route("/", projectTagRoutes());
+  scoped.route("/", financeRoutes());
   app.route("/v1", scoped);
   // Operator surface (specs/09). Outside /v1 and outside the JSON contract:
   // server-rendered HTML behind the admin-only gate, with its own error

@@ -156,6 +156,26 @@ export function fmtSigned(n: number | null | undefined): string {
   const s = compact.format(Math.abs(n));
   return n > 0 ? `+${s}` : n < 0 ? `−${s}` : "0";
 }
+// Finances (spec §8): signed USD, always with the sign, never parentheses.
+export function fmtUsdSigned(n: number): string {
+  const abs = Math.abs(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  if (n > 0) return `+$${abs}`;
+  if (n < 0) return `−$${abs}`;
+  return `$${abs}`;
+}
+
+export function fmtUsd(n: number): string {
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Never abbreviated in a table — thousands separators, R$ suffix (§8).
+export function fmtRobux(n: number): string {
+  return `${Math.round(n).toLocaleString("en-US")} R$`;
+}
+
 export function relTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();

@@ -55,6 +55,13 @@
   --event-gold: #fbbf24;
   --event-muted: #a8a29e;
 
+  /* Finances (spec: finances §8). Green = earned, amber = spent, red =
+     something is wrong (owed/over budget) — never used for a normal spend. */
+  --fin-positive: #3dd68c;
+  --fin-negative: #e5a83c;
+  --fin-alert: #e5484d;
+  --fin-robux: #8a90a0;
+
   --font-sans: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
   --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -123,6 +130,11 @@
   --color-delta-up: var(--delta-up);
   --color-delta-down: var(--delta-down);
   --color-delta-flat: var(--delta-flat);
+
+  --color-fin-positive: var(--fin-positive);
+  --color-fin-negative: var(--fin-negative);
+  --color-fin-alert: var(--fin-alert);
+  --color-fin-robux: var(--fin-robux);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

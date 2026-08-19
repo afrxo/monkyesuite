@@ -51,6 +51,11 @@ function WorkspacePage() {
 
   const boardRef = useRef<BoardViewHandle>(null);
   const [mobileSheet, setMobileSheet] = useState<"left" | "right" | null>(null);
+  // The Finances tab owns the full width (its own People drawer + Position
+  // zone), so the notes/activity rail is hidden while it's active.
+  const [boardView, setBoardView] = useState<
+    "board" | "list" | "timeline" | "finances"
+  >("board");
 
   useEffect(() => {
     if (!project.data) return;
@@ -138,9 +143,12 @@ function WorkspacePage() {
         data-card-modal-open={cardTaskId ? "true" : undefined}
         className="grid overflow-hidden bg-surface-0 text-text-2"
         style={{
-          // Fill viewport below the 56px sticky AppHeader.
+          // Fill viewport below the 56px sticky AppHeader. On the Finances tab
+          // the notes rail is hidden, so drop its 360px column and let the main
+          // pane span the full remaining width.
           height: "calc(var(--vh) - 56px)",
-          gridTemplateColumns: "260px 1fr 360px",
+          gridTemplateColumns:
+            boardView === "finances" ? "260px 1fr" : "260px 1fr 360px",
         }}
       >
         {/* Left rail — desktop */}
@@ -184,19 +192,22 @@ function WorkspacePage() {
               onOpenCard={(taskId) =>
                 setCard(shortTaskId(project.data.slug, taskId))
               }
+              onViewChange={setBoardView}
             />
           ) : null}
         </main>
 
-        {/* Right rail — desktop */}
-        <div className="hidden md:contents">
-          <NotesRail
-            projectId={id}
-            projectSlug={project.data.slug}
-            onOpenCard={() => setDoc(null)}
-            onOpenDoc={setDoc}
-          />
-        </div>
+        {/* Right rail — desktop. Hidden on the Finances tab (it runs full-width). */}
+        {boardView !== "finances" ? (
+          <div className="hidden md:contents">
+            <NotesRail
+              projectId={id}
+              projectSlug={project.data.slug}
+              onOpenCard={() => setDoc(null)}
+              onOpenDoc={setDoc}
+            />
+          </div>
+        ) : null}
       </div>
 
       {cardTaskId && board.data ? (

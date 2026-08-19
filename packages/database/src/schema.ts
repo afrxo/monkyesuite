@@ -26,6 +26,8 @@ import {
   text,
   integer,
   bigint,
+  numeric,
+  date,
   boolean,
   timestamp,
   doublePrecision,
@@ -127,6 +129,34 @@ export const milestoneStatus = pgEnum("milestone_status", [
 
 // Card-detail activity feed event kinds (specs/08-web card modal). Append-only
 // history rendered in the modal side column.
+/* Finances (spec: finances §5). Currencies and kinds are closed sets. */
+export const financeCurrency = pgEnum("finance_currency", ["usd", "robux"]);
+
+export const financeDisplayCurrency = pgEnum("finance_display_currency", [
+  "usd",
+  "robux",
+  "both",
+]);
+
+export const financeKind = pgEnum("finance_kind", [
+  "revenue",
+  "expense",
+  "cashout",
+  "investment",
+  "distribution",
+]);
+
+export const financeExpenseStatus = pgEnum("finance_expense_status", [
+  "paid",
+  "owed",
+]);
+
+export const financePersonRating = pgEnum("finance_person_rating", [
+  "good",
+  "mixed",
+  "avoid",
+]);
+
 export const taskActivityKind = pgEnum("task_activity_kind", [
   "create",
   "status_change",
@@ -1581,6 +1611,321 @@ export const taskActivity = pgTable(
       for: "all",
       using: memberOf(t.projectId),
       withCheck: memberOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/* -------------------------------------------------------------------------- */
+/*  Finances (spec: finances §5) — owner-only visibility, RLS via              */
+/*  is_project_owner. USD is numeric(12,2), Robux is bigint (integers          */
+/*  everywhere). amount_usd is denormalised on write and never recomputed on   */
+/*  a rate change; rate_used is snapshotted per row.                           */
+/* -------------------------------------------------------------------------- */
+
+export const financeSettings = pgTable(
+  "finance_settings",
+  {
+    projectId: uuid("project_id")
+      .primaryKey()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    devexRate: numeric("devex_rate", { precision: 8, scale: 6, mode: "number" })
+      .notNull()
+      .default(0.0038),
+    displayCurrency: financeDisplayCurrency("display_currency")
+      .notNull()
+      .default("both"),
+    openingUsd: numeric("opening_usd", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }),
+    openingRobux: bigint("opening_robux", { mode: "number" }),
+    openingSetOn: date("opening_set_on"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    pgPolicy("finance_settings_owner_rw", {
+      for: "all",
+      using: ownerOf(t.projectId),
+      withCheck: ownerOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+export const financeBudgets = pgTable(
+  "finance_budgets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    month: date("month").notNull(), // always the 1st; per calendar month only
+    amountUsd: numeric("amount_usd", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    note: text("note"),
+  },
+  (t) => [
+    uniqueIndex("finance_budgets_project_month_uq").on(t.projectId, t.month),
+    pgPolicy("finance_budgets_owner_rw", {
+      for: "all",
+      using: ownerOf(t.projectId),
+      withCheck: ownerOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * people — contractors/backers, project-scoped, keyed on Discord handle.
+ * Same person in two projects is two rows; cross-project dedupe is a v2 problem.
+ */
+export const people = pgTable(
+  "people",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    discordHandle: text("discord_handle").notNull(), // primary human identifier
+    displayName: text("display_name"),
+    robloxUserId: bigint("roblox_user_id", { mode: "number" }),
+    robloxUsername: text("roblox_username"),
+    avatarUrl: text("avatar_url"), // cached Roblox headshot
+    roles: text("roles").array().notNull().default([]),
+    preferredMethod: text("preferred_method"), // matches transaction.method
+    defaultRateUsd: numeric("default_rate_usd", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }),
+    rating: financePersonRating("rating"),
+    note: text("note"), // one line, the "would I rehire" read
+    archived: boolean("archived").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("people_project_handle_uq").on(t.projectId, t.discordHandle),
+    pgPolicy("people_owner_rw", {
+      for: "all",
+      using: ownerOf(t.projectId),
+      withCheck: ownerOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * revenue_splits — % of gross earned revenue, date-ranged. Closing a deal
+ * means setting effective_to; percent is never edited on a live split
+ * (enforced at the API — PATCH accepts effective_to and note only).
+ */
+export const revenueSplits = pgTable(
+  "revenue_splits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    percent: numeric("percent", {
+      precision: 5,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"), // null = still running
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("revenue_splits_project_from_idx").on(t.projectId, t.effectiveFrom),
+    pgPolicy("revenue_splits_owner_rw", {
+      for: "all",
+      using: ownerOf(t.projectId),
+      withCheck: ownerOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+export const financeCategories = pgTable(
+  "finance_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color").notNull(),
+    sort: integer("sort").notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex("finance_categories_project_name_uq").on(t.projectId, t.name),
+    pgPolicy("finance_categories_owner_rw", {
+      for: "all",
+      using: ownerOf(t.projectId),
+      withCheck: ownerOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * finance_transactions — one table for all five kinds; kind-specific required
+ * fields are enforced in the application layer, not check constraints.
+ * `amount_usd` is the column every aggregate reads.
+ */
+export const financeTransactions = pgTable(
+  "finance_transactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    ref: text("ref").notNull(), // 'SO-F001', sequential per project
+    kind: financeKind("kind").notNull(),
+    occurredOn: date("occurred_on").notNull(), // groups it into a month
+    description: text("description").notNull(),
+    currency: financeCurrency("currency"),
+    amountGross: numeric("amount_gross", {
+      precision: 14,
+      scale: 2,
+      mode: "number",
+    }),
+    feeAmount: numeric("fee_amount", { precision: 14, scale: 2, mode: "number" })
+      .notNull()
+      .default(0), // expenses only; always 0 on revenue
+    amountNet: numeric("amount_net", {
+      precision: 14,
+      scale: 2,
+      mode: "number",
+    }),
+    costAmount: numeric("cost_amount", {
+      precision: 14,
+      scale: 2,
+      mode: "number",
+    }), // expenses only: what actually left
+    rateUsed: numeric("rate_used", {
+      precision: 8,
+      scale: 6,
+      mode: "number",
+    }).notNull(),
+    amountUsd: numeric("amount_usd", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    // expense only
+    categoryId: uuid("category_id").references(() => financeCategories.id),
+    personId: uuid("person_id").references(() => people.id),
+    method: text("method"),
+    status: financeExpenseStatus("status").notNull().default("paid"),
+    paidOn: date("paid_on"), // null while owed
+    // cashout only
+    robuxOut: bigint("robux_out", { mode: "number" }),
+    usdIn: numeric("usd_in", { precision: 12, scale: 2, mode: "number" }),
+    // distribution only: which deal it settles; null = off-book payout.
+    // method is constrained in the application layer to robux_group_payout
+    // (robux) | wise | paypal | bank (usd) — robux_gamepass never (§4.8.1).
+    splitId: uuid("split_id").references(() => revenueSplits.id),
+    // graph links
+    milestoneId: uuid("milestone_id").references(() => milestones.id, {
+      onDelete: "set null",
+    }),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    paymentRef: text("payment_ref"), // Wise transfer id, PayPal txn, gamepass id
+    receiptUrl: text("receipt_url"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("finance_tx_project_ref_uq").on(t.projectId, t.ref),
+    index("finance_tx_project_date_idx").on(t.projectId, t.occurredOn.desc()),
+    index("finance_tx_project_kind_status_idx").on(
+      t.projectId,
+      t.kind,
+      t.status,
+    ),
+    index("finance_tx_person_idx").on(t.personId),
+    pgPolicy("finance_tx_owner_rw", {
+      for: "all",
+      using: ownerOf(t.projectId),
+      withCheck: ownerOf(t.projectId),
+    }),
+  ],
+).enableRLS();
+
+/**
+ * finance_split_accruals — the only derived table. Materialised in the same
+ * transaction as the revenue row (rewritten on edit, cascaded on delete)
+ * because three surfaces (Owed tile, balance-sheet liabilities, People drawer)
+ * need the same aggregate and recomputing it in three places is how figures
+ * drift apart.
+ */
+export const financeSplitAccruals = pgTable(
+  "finance_split_accruals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    splitId: uuid("split_id")
+      .notNull()
+      .references(() => revenueSplits.id, { onDelete: "cascade" }),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    revenueTxId: uuid("revenue_tx_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    occurredOn: date("occurred_on").notNull(), // copied from the revenue row
+    currency: financeCurrency("currency").notNull(),
+    amountNative: numeric("amount_native", {
+      precision: 14,
+      scale: 2,
+      mode: "number",
+    }).notNull(), // integer-valued when currency = 'robux'
+    amountUsd: numeric("amount_usd", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    rateUsed: numeric("rate_used", {
+      precision: 8,
+      scale: 6,
+      mode: "number",
+    }).notNull(), // snapshotted from the revenue row
+    percentUsed: numeric("percent_used", {
+      precision: 5,
+      scale: 2,
+      mode: "number",
+    }).notNull(), // snapshotted; the split may later be closed
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("finance_accruals_project_date_idx").on(t.projectId, t.occurredOn),
+    index("finance_accruals_person_currency_idx").on(t.personId, t.currency),
+    pgPolicy("finance_accruals_owner_rw", {
+      for: "all",
+      using: ownerOf(t.projectId),
+      withCheck: ownerOf(t.projectId),
     }),
   ],
 ).enableRLS();

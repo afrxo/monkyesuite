@@ -96,6 +96,13 @@ grant select, insert, update, delete on
   blocks,
   notes,
   project_game,
+  finance_settings,
+  finance_budgets,
+  finance_categories,
+  finance_transactions,
+  finance_split_accruals,
+  people,
+  revenue_splits,
   game_notes,
   users,
   sessions,
@@ -128,6 +135,11 @@ do $$ begin
   end if;
   if exists (select from pg_proc where proname = 'project_of_doc_folder') then
     grant execute on function project_of_doc_folder(uuid) to monkye_app;
+  end if;
+  if exists (select from pg_proc where proname = 'project_of_finance_tx') then
+    grant execute on function project_of_finance_tx(uuid) to monkye_app;
+    grant execute on function project_of_finance_person(uuid) to monkye_app;
+    grant execute on function project_of_finance_split(uuid) to monkye_app;
   end if;
   -- Adding a collaborator, owner and admin paths (specs/06 §6.3, specs/09
   -- §9.3a). Privileged insert with the collaborator cap enforced inside the

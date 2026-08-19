@@ -8,12 +8,13 @@ import type {
   Block,
   BlockInput,
   Board,
-  DocBlocks,
-  PatchDocMetaInput,
   CreateChecklistItemInput,
   CreateCommentInput,
   CreateDocFolderInput,
   CreateDocInput,
+  CreateFinancePersonInput,
+  CreateFinanceSplitInput,
+  CreateFinanceTxInput,
   CreateGameNoteInput,
   CreateMilestoneInput,
   CreateNoteInput,
@@ -24,9 +25,20 @@ import type {
   CreateTaskInput,
   DemandOverlay,
   Doc,
+  DocBlocks,
   DocFolder,
   FeedItem,
   FeedSort,
+  FinanceBudget,
+  FinanceCategory,
+  FinanceOverview,
+  FinancePerson,
+  FinancePersonDetail,
+  FinancePersonListRow,
+  FinancePosition,
+  FinanceSettings,
+  FinanceTransaction,
+  FinanceTransactionPage,
   GameDetail,
   GameEvent,
   GameMetric,
@@ -45,6 +57,10 @@ import type {
   PatchCommentInput,
   PatchDocFolderInput,
   PatchDocInput,
+  PatchDocMetaInput,
+  PatchFinancePersonInput,
+  PatchFinanceSplitInput,
+  PatchFinanceTxInput,
   PatchGameNoteInput,
   PatchMilestoneInput,
   PatchNoteInput,
@@ -60,7 +76,10 @@ import type {
   PulsePayload,
   PulseSearchResult,
   PulseSort,
+  PutFinanceBudgetInput,
+  PutFinanceSettingsInput,
   ReorderTaskInput,
+  RevenueSplit,
   SortSnapshot,
   Tag,
   Task,
@@ -83,7 +102,7 @@ export class ApiError extends Error {
   }
 }
 
-type Method = "GET" | "POST" | "PATCH" | "DELETE";
+type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 // One request path for global reads AND scoped calls. credentials:"include"
 // sends the Better Auth session cookie to the API origin so scoped routes see a
@@ -238,7 +257,10 @@ export const api = {
 
   patchDocMeta: (docId: string, input: PatchDocMetaInput) =>
     patch<Doc>(`/docs/${docId}/meta`, input),
-  docMediaUpload: (docId: string, input: { fileName: string; mimeType: string }) =>
+  docMediaUpload: (
+    docId: string,
+    input: { fileName: string; mimeType: string },
+  ) =>
     post<{ uploadUrl: string; publicUrl: string }>(
       `/docs/${docId}/uploads`,
       input,
@@ -295,7 +317,10 @@ export const api = {
     taskId: string,
     input: { fileName: string; mimeType: string; sizeBytes: number },
   ) =>
-    post<AttachmentUploadTicket>(`/tasks/${taskId}/attachments/upload-url`, input),
+    post<AttachmentUploadTicket>(
+      `/tasks/${taskId}/attachments/upload-url`,
+      input,
+    ),
   confirmAttachment: (
     taskId: string,
     input: {
@@ -322,4 +347,76 @@ export const api = {
     post<ProjectTag>(`/tasks/${taskId}/tags`, { tagId }),
   removeTaskTag: (taskId: string, tagId: string) =>
     del(`/tasks/${taskId}/tags/${tagId}`),
+
+  /* ------------------------------- finances ------------------------------ */
+
+  financeOverview: (id: string, month?: string) =>
+    get<FinanceOverview>(`/projects/${id}/finance/overview${qs({ month })}`),
+  financePosition: (id: string, period: string = "all") =>
+    get<FinancePosition>(`/projects/${id}/finance/position${qs({ period })}`),
+
+  financeTransactions: (
+    id: string,
+    params: {
+      month?: string;
+      kind?: string;
+      category?: string;
+      method?: string;
+      person?: string;
+      status?: string;
+      milestone?: string;
+      q?: string;
+      cursor?: string;
+    } = {},
+  ) =>
+    get<FinanceTransactionPage>(
+      `/projects/${id}/finance/transactions${qs({ ...params })}`,
+    ),
+  createFinanceTx: (id: string, input: CreateFinanceTxInput) =>
+    post<FinanceTransaction>(`/projects/${id}/finance/transactions`, input),
+  patchFinanceTx: (txId: string, input: PatchFinanceTxInput) =>
+    patch<FinanceTransaction>(`/finance/transactions/${txId}`, input),
+  deleteFinanceTx: (txId: string) => del(`/finance/transactions/${txId}`),
+
+  financePeople: (id: string) =>
+    get<FinancePersonListRow[]>(`/projects/${id}/finance/people`),
+  createFinancePerson: (id: string, input: CreateFinancePersonInput) =>
+    post<FinancePerson>(`/projects/${id}/finance/people`, input),
+  patchFinancePerson: (personId: string, input: PatchFinancePersonInput) =>
+    patch<FinancePerson>(`/finance/people/${personId}`, input),
+  financePerson: (personId: string) =>
+    get<FinancePersonDetail>(`/finance/people/${personId}`),
+
+  financeSplits: (id: string) =>
+    get<RevenueSplit[]>(`/projects/${id}/finance/splits`),
+  createFinanceSplit: (id: string, input: CreateFinanceSplitInput) =>
+    post<RevenueSplit>(`/projects/${id}/finance/splits`, input),
+  patchFinanceSplit: (splitId: string, input: PatchFinanceSplitInput) =>
+    patch<RevenueSplit>(`/finance/splits/${splitId}`, input),
+
+  financeCategories: (id: string) =>
+    get<FinanceCategory[]>(`/projects/${id}/finance/categories`),
+
+  financeBudget: (id: string, month: string) =>
+    get<FinanceBudget | null>(`/projects/${id}/finance/budgets/${month}`),
+  putFinanceBudget: (id: string, month: string, input: PutFinanceBudgetInput) =>
+    request<FinanceBudget>(
+      "PUT",
+      `/projects/${id}/finance/budgets/${month}`,
+      input,
+    ),
+
+  financeSettings: (id: string) =>
+    get<FinanceSettings>(`/projects/${id}/finance/settings`),
+  putFinanceSettings: (id: string, input: PutFinanceSettingsInput) =>
+    request<FinanceSettings>("PUT", `/projects/${id}/finance/settings`, input),
+
+  robloxUserLookup: (username: string) =>
+    get<{
+      found: boolean;
+      id?: number;
+      username?: string;
+      displayName?: string;
+      avatarUrl?: string | null;
+    }>(`/roblox/user-lookup${qs({ username })}`),
 };
