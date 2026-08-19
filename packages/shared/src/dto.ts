@@ -397,6 +397,9 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   dueAt: string | null;
+  // Timeline span start (UTC-midnight ISO). Never set without dueAt — the API
+  // enforces the invariant; clearing dueAt clears startAt server-side.
+  startAt: string | null;
   coverUrl: string | null;
   tags: ProjectTag[];
   // One level of subtasks only (specs/05 §5.1). Present on top-level cards.
@@ -471,7 +474,8 @@ export type TaskActivityKind =
   | "comment"
   | "attachment"
   | "checklist_add"
-  | "checklist_complete";
+  | "checklist_complete"
+  | "schedule_change";
 
 export interface TaskActivityEvent {
   id: string;

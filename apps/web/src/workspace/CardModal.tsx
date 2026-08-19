@@ -552,7 +552,6 @@ function PickerRowsSkeleton({ rows }: { rows: number }) {
   );
 }
 
-
 // Sub-list placeholder: shown under a real, already-populated header + meta
 // strip + title while the detail fetch fills in checklist / attachments /
 // comments. Shapes match the real sections so nothing jumps on swap.
@@ -624,8 +623,7 @@ function MetaStrip({
 }) {
   const t = detail.task;
   const setMilestone = useMutation({
-    mutationFn: (id: string | null) =>
-      api.patchTask(t.id, { milestoneId: id }),
+    mutationFn: (id: string | null) => api.patchTask(t.id, { milestoneId: id }),
     onSuccess: invalidate,
     onError: (err) => toastError(err),
   });
@@ -635,8 +633,7 @@ function MetaStrip({
     onError: (err) => toastError(err),
   });
   const setAssignees = useMutation({
-    mutationFn: (uids: string[]) =>
-      api.patchTask(t.id, { assigneeIds: uids }),
+    mutationFn: (uids: string[]) => api.patchTask(t.id, { assigneeIds: uids }),
     onSuccess: invalidate,
     onError: (err) => toastError(err),
   });
@@ -672,7 +669,6 @@ function MetaStrip({
     </div>
   );
 }
-
 
 function LinkedNotesChip({ notes }: { notes: LinkedNote[] }) {
   const [open, setOpen] = useState(false);
@@ -723,13 +719,7 @@ function LinkedNoteRow({ note }: { note: LinkedNote }) {
 
 /* --------------------------------- title ---------------------------------- */
 
-function TitleField({
-  task,
-  onSaved,
-}: {
-  task: Task;
-  onSaved: () => void;
-}) {
+function TitleField({ task, onSaved }: { task: Task; onSaved: () => void }) {
   const [value, setValue] = useState(task.title);
   useEffect(() => setValue(task.title), [task.title]);
   const save = useMutation({
@@ -900,8 +890,7 @@ function DescriptionField({
     const ta = taRef.current;
     if (!ta || !slash) return;
     const caret = ta.selectionStart;
-    const next =
-      value.slice(0, slash.start) + it.insert + value.slice(caret);
+    const next = value.slice(0, slash.start) + it.insert + value.slice(caret);
     const newCaret = slash.start + it.insert.length + (it.caretOffset ?? 0);
     setValue(next);
     setSlash(null);
@@ -935,7 +924,8 @@ function DescriptionField({
                 if (e.key === "ArrowUp") {
                   e.preventDefault();
                   setSlashIdx(
-                    (i) => (i - 1 + filteredSlash.length) % filteredSlash.length,
+                    (i) =>
+                      (i - 1 + filteredSlash.length) % filteredSlash.length,
                   );
                   return;
                 }
@@ -1607,7 +1597,8 @@ function activityText(
         : 0;
       if (added && removed) return `updated assignees (+${added}, -${removed})`;
       if (added) return `added ${added} assignee${added === 1 ? "" : "s"}`;
-      if (removed) return `removed ${removed} assignee${removed === 1 ? "" : "s"}`;
+      if (removed)
+        return `removed ${removed} assignee${removed === 1 ? "" : "s"}`;
       return "changed assignees";
     }
     case "comment":
@@ -1618,6 +1609,15 @@ function activityText(
       return `added item “${String(payload.text ?? "").slice(0, 40)}”`;
     case "checklist_complete":
       return `completed “${String(payload.text ?? "").slice(0, 40)}”`;
+    case "schedule_change": {
+      const to = (payload.to ?? {}) as { startAt?: unknown; dueAt?: unknown };
+      if (!to.dueAt) return "cleared the schedule";
+      const day = (v: unknown) =>
+        typeof v === "string" ? v.slice(0, 10) : null;
+      const start = day(to.startAt);
+      const due = day(to.dueAt);
+      return start ? `scheduled ${start} → ${due}` : `set due ${due}`;
+    }
   }
 }
 
@@ -1650,7 +1650,11 @@ function MilestonePicker({
         >
           <span
             className="inline-block h-1.5 w-1.5 rounded-full"
-            style={{ background: selected ? "var(--accent-warm)" : "var(--text-disabled)" }}
+            style={{
+              background: selected
+                ? "var(--accent-warm)"
+                : "var(--text-disabled)",
+            }}
           />
           {selected ? selected.name : "no milestone"}
           <Icon name="chevron-down" size={9} className="text-text-disabled" />
@@ -1786,11 +1790,7 @@ function AssigneePicker({
               <span className="truncate">{m.user.name ?? m.user.email}</span>
               {selected.has(m.userId) ? (
                 <span className="ml-auto">
-                  <Icon
-                    name="check"
-                    size={10}
-                    className="text-text-disabled"
-                  />
+                  <Icon name="check" size={10} className="text-text-disabled" />
                 </span>
               ) : null}
             </button>
@@ -2089,7 +2089,7 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 function mimeBadge(mime: string, name: string): string {
-  const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
+  const ext = name.includes(".") ? (name.split(".").pop() ?? "") : "";
   if (ext) return ext.slice(0, 4).toUpperCase();
   if (mime.startsWith("image/")) return "IMG";
   if (mime.startsWith("video/")) return "VID";

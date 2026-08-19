@@ -123,8 +123,7 @@ function mapActivity(row: ActivityJoin): TaskActivityEvent {
         }
       : null,
     kind: a.kind,
-    payload:
-      (a.payload as Record<string, unknown> | null | undefined) ?? {},
+    payload: (a.payload as Record<string, unknown> | null | undefined) ?? {},
     createdAt: isoReq(a.createdAt),
   };
 }
@@ -352,6 +351,7 @@ export function cardRoutes(): Hono<AppEnv> {
           createdAt: isoReq(taskRow.createdAt),
           updatedAt: isoReq(taskRow.updatedAt),
           dueAt: iso(taskRow.dueAt),
+          startAt: iso(taskRow.startAt),
           coverUrl: null,
           tags: (await tagsByTask(tx, [taskRow.id])).get(taskRow.id) ?? [],
           subtasks: [],
@@ -410,39 +410,36 @@ export function cardRoutes(): Hono<AppEnv> {
       await c.req.json().catch(() => ({})),
     );
     if (!body.success) throw validationError("Invalid comment.");
-    const created = await withUser(
-      userId,
-      async (tx): Promise<TaskComment> => {
-        const { projectId } = await resolveItemAccess(tx, "task", id, userId);
-        const [row] = await tx
-          .insert(taskComments)
-          .values({
-            taskId: id,
-            projectId,
-            authorId: userId,
-            body: body.data.body,
-          })
-          .returning();
-        if (!row) throw notFound("Comment creation failed.");
-        await logActivity(tx, {
+    const created = await withUser(userId, async (tx): Promise<TaskComment> => {
+      const { projectId } = await resolveItemAccess(tx, "task", id, userId);
+      const [row] = await tx
+        .insert(taskComments)
+        .values({
           taskId: id,
           projectId,
-          actorId: userId,
-          kind: "comment",
-          payload: { commentId: row.id },
-        });
-        const [author] = await tx
-          .select({ name: users.name, email: users.email })
-          .from(users)
-          .where(eq(users.id, userId))
-          .limit(1);
-        return mapComment({
-          comment: row,
-          authorName: author?.name ?? null,
-          authorEmail: author?.email ?? null,
-        });
-      },
-    );
+          authorId: userId,
+          body: body.data.body,
+        })
+        .returning();
+      if (!row) throw notFound("Comment creation failed.");
+      await logActivity(tx, {
+        taskId: id,
+        projectId,
+        actorId: userId,
+        kind: "comment",
+        payload: { commentId: row.id },
+      });
+      const [author] = await tx
+        .select({ name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      return mapComment({
+        comment: row,
+        authorName: author?.name ?? null,
+        authorEmail: author?.email ?? null,
+      });
+    });
     return c.json(created, 201);
   });
 
@@ -453,37 +450,34 @@ export function cardRoutes(): Hono<AppEnv> {
       await c.req.json().catch(() => ({})),
     );
     if (!body.success) throw validationError("Invalid update.");
-    const updated = await withUser(
-      userId,
-      async (tx): Promise<TaskComment> => {
-        const taskId = await commentTaskId(tx, id);
-        if (!taskId) throw notFound("No such comment.");
-        await resolveItemAccess(tx, "task", taskId, userId);
-        const [existing] = await tx
-          .select()
-          .from(taskComments)
-          .where(eq(taskComments.id, id))
-          .limit(1);
-        if (!existing) throw notFound("No such comment.");
-        if (existing.authorId !== userId) throw forbidden("Author only.");
-        const [row] = await tx
-          .update(taskComments)
-          .set({ body: body.data.body, updatedAt: new Date() })
-          .where(eq(taskComments.id, id))
-          .returning();
-        if (!row) throw notFound("No such comment.");
-        const [author] = await tx
-          .select({ name: users.name, email: users.email })
-          .from(users)
-          .where(eq(users.id, row.authorId))
-          .limit(1);
-        return mapComment({
-          comment: row,
-          authorName: author?.name ?? null,
-          authorEmail: author?.email ?? null,
-        });
-      },
-    );
+    const updated = await withUser(userId, async (tx): Promise<TaskComment> => {
+      const taskId = await commentTaskId(tx, id);
+      if (!taskId) throw notFound("No such comment.");
+      await resolveItemAccess(tx, "task", taskId, userId);
+      const [existing] = await tx
+        .select()
+        .from(taskComments)
+        .where(eq(taskComments.id, id))
+        .limit(1);
+      if (!existing) throw notFound("No such comment.");
+      if (existing.authorId !== userId) throw forbidden("Author only.");
+      const [row] = await tx
+        .update(taskComments)
+        .set({ body: body.data.body, updatedAt: new Date() })
+        .where(eq(taskComments.id, id))
+        .returning();
+      if (!row) throw notFound("No such comment.");
+      const [author] = await tx
+        .select({ name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, row.authorId))
+        .limit(1);
+      return mapComment({
+        comment: row,
+        authorName: author?.name ?? null,
+        authorEmail: author?.email ?? null,
+      });
+    });
     return c.json(updated);
   });
 
@@ -643,9 +637,9 @@ export function cardRoutes(): Hono<AppEnv> {
     const userId = requireUser(c);
     const id = uuidSchema.parse(c.req.param("id"));
     const body = await c.req.json().catch(() => ({}));
-    const parsed = attachmentConfirmSchema.merge(
-      attachmentUploadRequestSchema,
-    ).safeParse(body);
+    const parsed = attachmentConfirmSchema
+      .merge(attachmentUploadRequestSchema)
+      .safeParse(body);
     if (!parsed.success) throw validationError("Invalid confirm.");
     const created = await withUser(
       userId,

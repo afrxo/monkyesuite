@@ -136,6 +136,7 @@ export const taskActivityKind = pgEnum("task_activity_kind", [
   "attachment",
   "checklist_add",
   "checklist_complete",
+  "schedule_change",
 ]);
 
 /* ========================================================================== */
@@ -1073,12 +1074,20 @@ export const tasks = pgTable(
       .notNull()
       .defaultNow(),
     dueAt: timestamp("due_at", { withTimezone: true }),
+    // Timeline span start. Only meaningful alongside dueAt — the API enforces
+    // that a task never has a start without a due (due is the anchor; clearing
+    // due clears start in the same statement). UTC-midnight day semantics.
+    startAt: timestamp("start_at", { withTimezone: true }),
     // Cover image: references a task_attachment id (no FK — avoids circular
     // dependency with task_attachments which already references tasks).
     coverAttachmentId: uuid("cover_attachment_id"),
   },
   (t) => [
     index("tasks_project_idx").on(t.projectId),
+    // timeline range reads: only scheduled rows matter
+    index("tasks_project_schedule_idx")
+      .on(t.projectId, t.dueAt)
+      .where(sql`${t.dueAt} is not null`),
     // board queries fetch a project's lane and sort by orderKey
     index("tasks_board_idx").on(t.projectId, t.status, t.orderKey),
     index("tasks_milestone_idx").on(t.milestoneId),

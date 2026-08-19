@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline view — visual reference</title>
+<style>
+  :root{
+    --bg:#0A0A0C;
+    --panel:#0F0F12;
+    --panel-2:#141418;
+    --line:rgba(255,255,255,.07);
+    --line-2:rgba(255,255,255,.12);
+    --t1:#E8E9EC;
+    --t2:#93959C;
+    --t3:#5E6067;
+    --danger:#F0576F;
+    --sans:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    --row-ms:36px; --row-task:30px; --gutter:280px; --axis:52px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--t1);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  body{padding:20px}
+
+  .app{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel);max-width:1400px}
+
+  /* ── chrome ───────────────────────────────────────────── */
+  .chrome{display:flex;align-items:center;gap:14px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .tabs{display:flex;gap:2px}
+  .tab{font-size:13px;padding:5px 11px;border-radius:6px;color:var(--t2);cursor:pointer;border:0;background:transparent;font-family:inherit}
+  .tab.is-on{background:var(--panel-2);color:var(--t1)}
+  .spacer{flex:1}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{font-size:11px;letter-spacing:.02em;padding:5px 9px;background:transparent;border:0;color:var(--t2);cursor:pointer;font-family:inherit}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.is-on{background:var(--panel-2);color:var(--t1)}
+  .ghost{font-size:11px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--t2);cursor:pointer;font-family:inherit}
+  .meta{font-size:11px;color:var(--t3)}
+
+  .tagbar{display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--line)}
+  .tagbar .k{font-size:10px;letter-spacing:.09em;color:var(--t3);margin-right:4px}
+  .chip{font-size:11px;padding:2px 7px;border-radius:4px;font-family:var(--mono)}
+  .chip i{font-style:normal;opacity:.55;margin-left:5px}
+
+  /* ── scroller + grid ──────────────────────────────────── */
+  .scroll{overflow:auto;max-height:640px}
+  .grid{display:grid;position:relative;font-size:12px}
+  .overlay{position:absolute;top:0;bottom:0;z-index:1;pointer-events:none}
+
+  .label{position:sticky;left:0;z-index:3;background:var(--panel);border-right:1px solid var(--line);
+         border-bottom:1px solid var(--line);display:flex;align-items:center;gap:7px;padding:0 12px;overflow:hidden}
+  .lane{position:relative;z-index:2;border-bottom:1px solid var(--line);overflow:hidden}
+
+  /* axis */
+  .axis-l{position:sticky;left:0;top:0;z-index:5;background:var(--panel);border-right:1px solid var(--line);
+          border-bottom:1px solid var(--line-2);display:flex;align-items:flex-end;padding:0 12px 7px}
+  .axis-c{position:sticky;top:0;z-index:4;background:var(--panel);border-bottom:1px solid var(--line-2)}
+  .ax-major{position:absolute;top:6px;font-size:11px;color:var(--t2);padding-left:7px;letter-spacing:.01em}
+  .ax-minor{position:absolute;top:31px;font-size:10px;color:var(--t3);padding-left:7px;font-family:var(--mono)}
+  .ax-rule{position:absolute;top:24px;bottom:0;width:1px;background:var(--line)}
+  .today-pill{position:absolute;top:28px;transform:translateX(-50%);background:var(--t1);color:var(--bg);
+              font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:4px;white-space:nowrap;z-index:6}
+
+  /* overlay furniture */
+  .o-past{position:absolute;top:0;bottom:0;left:0;background:rgba(0,0,0,.16)}
+  .o-rule{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+  .o-today{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.30)}
+
+  /* gutter content */
+  .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+  .ms-name{font-size:12px;font-weight:590;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ms-meta{font-size:10px;color:var(--t3);font-family:var(--mono);white-space:nowrap;margin-left:auto;padding-left:8px}
+  .ms-meta .over{color:var(--danger)}
+  .caret{width:11px;color:var(--t3);font-size:9px;cursor:pointer;user-select:none;flex:0 0 auto}
+  .t-name{font-size:12px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .t-name.is-done{color:var(--t3)}
+  .pip{width:6px;height:6px;border-radius:50%;flex:0 0 auto;margin-left:4px}
+  .tdots{display:flex;gap:3px;margin-left:auto;padding-left:8px;flex:0 0 auto}
+  .tdots span{width:5px;height:5px;border-radius:50%}
+  .prog{font-size:10px;color:var(--t3);font-family:var(--mono);flex:0 0 auto;padding-left:7px}
+  .hint{font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:auto}
+
+  /* milestone track */
+  .track{position:absolute;height:8px;top:50%;margin-top:-4px;border-radius:4px;overflow:hidden}
+  .track b{position:absolute;left:0;top:0;bottom:0;display:block}
+  .slip{position:absolute;height:8px;top:50%;margin-top:-4px;border-radius:0 4px 4px 0;
+        background:repeating-linear-gradient(45deg,rgba(240,87,111,.55) 0 2px,transparent 2px 5px);
+        border-top:1px solid rgba(240,87,111,.35);border-bottom:1px solid rgba(240,87,111,.35)}
+  .dia{position:absolute;width:13px;height:13px;top:50%;margin-top:-6.5px;transform:translateX(-50%) rotate(45deg);border-radius:2px}
+  .dia.warn{border-color:var(--danger) !important;background:rgba(240,87,111,.18) !important}
+
+  /* task bar */
+  .bar{position:absolute;height:20px;top:50%;margin-top:-10px;border-radius:5px;overflow:hidden;cursor:grab}
+  .bar .fill{position:absolute;left:0;top:0;bottom:0}
+  .bar .lbl{position:relative;z-index:2;display:block;padding:0 7px;line-height:20px;font-size:11px;
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar .cap-l{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--danger);z-index:3}
+  .bar .cap-r{position:absolute;right:0;top:0;bottom:0;width:3px;z-index:3}
+  .outlbl{position:absolute;top:50%;margin-top:-8px;font-size:11px;color:var(--t2);line-height:16px;white-space:nowrap}
+  .outlbl.is-done{color:var(--t3)}
+  .late{color:var(--danger);font-family:var(--mono);font-size:10px;margin-left:7px}
+  .mark{position:absolute;width:11px;height:11px;top:50%;margin-top:-5.5px;
+        transform:translateX(-50%) rotate(45deg);border-radius:2px}
+
+  /* tray */
+  .tray{border-top:1px solid var(--line-2);background:var(--panel)}
+  .tray-h{display:flex;align-items:center;gap:9px;padding:9px 14px;cursor:pointer}
+  .tray-h .ttl{font-size:10px;letter-spacing:.09em;color:var(--t2)}
+  .tray-h .cnt{font-size:10px;font-family:var(--mono);color:var(--t3)}
+  .tray-b{display:flex;flex-wrap:wrap;gap:7px;padding:0 14px 13px}
+  .tray-b[hidden]{display:none}
+  .tchip{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:6px;
+         padding:5px 9px;background:var(--panel-2);cursor:grab}
+  .tchip .n{font-size:11px;color:var(--t1)}
+
+  .legend{max-width:1400px;margin-top:14px;font-size:11px;color:var(--t3);line-height:1.7}
+  .legend b{color:var(--t2);font-weight:500}
+  .legend code{font-family:var(--mono);color:var(--t2)}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="chrome">
+    <div class="tabs">
+      <button class="tab">Board</button>
+      <button class="tab">List</button>
+      <button class="tab is-on">Timeline</button>
+    </div>
+    <span class="meta">somegame</span>
+    <div class="spacer"></div>
+    <button class="ghost" onclick="scrollToToday()">Today</button>
+    <button class="ghost" onclick="setZoom('fit')">Fit</button>
+    <div class="seg" id="zoom">
+      <button data-z="quarter">Quarters</button>
+      <button data-z="month" class="is-on">Months</button>
+      <button data-z="week">Weeks</button>
+      <button data-z="day">Days</button>
+    </div>
+  </div>
+
+  <div class="tagbar">
+    <span class="k">TAGS</span>
+    <span class="chip" style="background:rgba(95,208,138,.12);color:#5FD08A">audio<i>1</i></span>
+    <span class="chip" style="background:rgba(240,87,111,.12);color:#F0576F">blocker<i>3</i></span>
+    <span class="chip" style="background:rgba(217,160,91,.12);color:#D9A05B">combat<i>4</i></span>
+    <span class="chip" style="background:rgba(110,196,138,.12);color:#6EC48A">monetization<i>1</i></span>
+    <span class="chip" style="background:rgba(107,165,240,.12);color:#6BA5F0">net<i>4</i></span>
+    <span class="chip" style="background:rgba(143,163,196,.12);color:#8FA3C4">ops<i>4</i></span>
+    <span class="chip" style="background:rgba(116,196,141,.12);color:#74C48D">research<i>4</i></span>
+    <span class="chip" style="background:rgba(177,138,240,.12);color:#B18AF0">ui<i>2</i></span>
+  </div>
+
+  <div class="scroll" id="scroll"><div class="grid" id="grid"></div></div>
+
+  <div class="tray">
+    <div class="tray-h" onclick="document.getElementById('trayb').hidden = !document.getElementById('trayb').hidden">
+      <span class="ttl">UNSCHEDULED</span><span class="cnt" id="traycnt"></span>
+      <div class="spacer"></div>
+      <span class="cnt">drag onto a lane to schedule</span>
+    </div>
+    <div class="tray-b" id="trayb"></div>
+  </div>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<script>
+/* ══ scale: day-index integers, never Date arithmetic ══════════════════ */
+const MS = 86400000;
+const toDay   = iso => { const [y,m,d] = iso.split('-').map(Number); return Math.floor(Date.UTC(y,m-1,d)/MS); };
+const fromDay = i   => new Date(i*MS);                      // read with getUTC* only
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+const ORIGIN = toDay('2026-07-20');      // Monday
+const END    = toDay('2026-12-27');      // Sunday
+const TODAY  = toDay('2026-08-19');
+const DAYS   = END - ORIGIN + 1;
+
+const ZOOM = { quarter:2.6, month:6.5, week:18, day:44 };
+const GUTTER = 280;
+let dayWidth = ZOOM.month;
+
+const x  = d => (d - ORIGIN) * dayWidth;              // left edge of day d
+const xc = d => x(d) + dayWidth / 2;                  // centre of day d
+const w  = (a,b) => (b - a + 1) * dayWidth;           // inclusive span
+
+/* ══ data (mirrors the project in the screenshots, post-scheduling) ═══ */
+const TAG = { audio:'#5FD08A', blocker:'#F0576F', combat:'#D9A05B', monetization:'#6EC48A',
+              net:'#6BA5F0', ops:'#8FA3C4', research:'#74C48D', ui:'#B18AF0' };
+
+const MILESTONES = [
+  { id:'m1', name:'Research & signal',       color:'#4C8FF7', target:'2026-07-29', done:3, total:3, collapsed:true },
+  { id:'m2', name:'Prototype the core loop', color:'#F2A93B', target:'2026-08-28', done:0, total:5 },
+  { id:'m3', name:'Closed test (50 players)',color:'#F04E6E', target:'2026-09-22', done:0, total:3 },
+  { id:'m4', name:'Soft launch',             color:'#A472F0', target:'2026-10-27', done:0, total:2 },
+  { id:'m5', name:'Live ops loop',           color:'#35CFE0', target:'2026-12-16', done:0, total:2 },
+  { id:'m0', name:'No milestone',            color:'#6B6E76', target:null,          done:0, total:1 },
+];
+
+const TASKS = [
+  { m:'m2', t:'Parry system prototype',        s:'IN PROGRESS', start:'2026-08-10', due:'2026-08-23', tags:['blocker','combat','net'], ck:[2,5] },
+  { m:'m2', t:'Map: The Alley (v0.3)',         s:'IN PROGRESS', start:'2026-08-17', due:'2026-08-27', tags:['ui'],                     ck:[2,4] },
+  { m:'m2', t:'Movement — sprint + dodge cancel', s:'IN PROGRESS', start:'2026-08-19', due:'2026-08-26', tags:['combat'] },
+  { m:'m2', t:'Hitbox visualization tool',     s:'REVIEW',      due:'2026-08-14',   tags:['net','ui'] },
+  { m:'m2', t:'Sound design pass 1',           s:'REVIEW',                           tags:['audio'] },
+  { m:'m3', t:'Instrument the funnel',         s:'TO DO',       start:'2026-08-31', due:'2026-09-05', tags:['net','ops'] },
+  { m:'m3', t:'Closed-test invite plan',       s:'TO DO',       start:'2026-09-01', due:'2026-09-07', tags:['ops'],        ck:[0,3] },
+  { m:'m3', t:'Anti-cheat baseline',           s:'TO DO',       start:'2026-09-18', due:'2026-09-29', tags:['blocker','net'] },
+  { m:'m4', t:'Cosmetic economy — first drop', s:'BACKLOG',     due:'2026-10-17',   tags:['monetization'], ck:[0,3] },
+  { m:'m4', t:'Front-page sort read',          s:'BACKLOG',                          tags:['research'] },
+  { m:'m5', t:'Weekly balance ritual',         s:'BACKLOG',                          tags:['ops'] },
+  { m:'m5', t:'Creator outreach shortlist',    s:'BACKLOG',                          tags:['ops'] },
+  { m:'m0', t:'Rename the game already',       s:'BACKLOG',                          tags:['blocker'] },
+];
+
+/* ══ status ladder ═══════════════════════════════════════════════════ */
+const hex = (h,a) => { const n = parseInt(h.slice(1),16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+
+function barStyle(st, c){
+  switch(st){
+    case 'BACKLOG':     return { border:`1px dashed ${hex(c,.40)}`, background:'transparent', color:'var(--t2)' };
+    case 'TO DO':       return { border:`1px solid ${hex(c,.55)}`,  background:hex(c,.08),    color:'var(--t1)' };
+    case 'IN PROGRESS': return { border:`1px solid ${hex(c,.70)}`,  background:hex(c,.22),    color:'var(--t1)' };
+    case 'REVIEW':      return { border:`1px solid ${hex(c,.70)}`,  background:hex(c,.18),    color:'var(--t1)' };
+    default:            return { border:'1px solid var(--line)',    background:'rgba(255,255,255,.05)', color:'var(--t3)' };
+  }
+}
+
+/* ══ render ══════════════════════════════════════════════════════════ */
+function render(){
+  const grid = document.getElementById('grid');
+  const canvasW = DAYS * dayWidth;
+  grid.style.gridTemplateColumns = `${GUTTER}px ${canvasW}px`;
+  grid.innerHTML = '';
+
+  /* overlay: month rules, past shading, today */
+  const ov = el('div','overlay');
+  ov.style.left = GUTTER + 'px';
+  ov.style.width = canvasW + 'px';
+  ov.append(Object.assign(el('div','o-past'), { style:`width:${x(TODAY)}px` }));
+  eachMonth(d => ov.append(Object.assign(el('div','o-rule'), { style:`left:${x(d)}px` })));
+  ov.append(Object.assign(el('div','o-today'), { style:`left:${x(TODAY)}px` }));
+  grid.append(ov);
+
+  /* axis */
+  const al = el('div','axis-l'); al.style.height = 'var(--axis)';
+  al.innerHTML = '<span style="font-size:10px;letter-spacing:.09em;color:var(--t3)">MILESTONE / TASK</span>';
+  const ac = el('div','axis-c'); ac.style.height = 'var(--axis)';
+  if (dayWidth >= ZOOM.week) {                       // major = month, minor = week
+    eachMonth(d => ac.append(txt('ax-major', MON[fromDay(d).getUTCMonth()], x(d))));
+    eachWeek(d  => { ac.append(txt('ax-minor', fromDay(d).getUTCDate(), x(d)));
+                     ac.append(Object.assign(el('div','ax-rule'), { style:`left:${x(d)}px` })); });
+  } else {                                           // major = year, minor = month
+    ac.append(txt('ax-major', fromDay(ORIGIN).getUTCFullYear(), 0));
+    eachMonth(d => { ac.append(txt('ax-minor', MON[fromDay(d).getUTCMonth()], x(d)));
+                     ac.append(Object.assign(el('div','ax-rule'), { style:`left:${x(d)}px` })); });
+  }
+  const pill = el('div','today-pill');
+  pill.textContent = 'today · ' + MON[fromDay(TODAY).getUTCMonth()] + ' ' + fromDay(TODAY).getUTCDate();
+  pill.style.left = xc(TODAY) + 'px';
+  ac.append(pill);
+  grid.append(al, ac);
+
+  /* rows */
+  MILESTONES.forEach((ms, i) => {
+    const mine = TASKS.filter(t => t.m === ms.id);
+    const dated = mine.filter(t => t.due);
+    const target = ms.target ? toDay(ms.target) : null;
+    const maxDue = dated.length ? Math.max(...dated.map(t => toDay(t.due))) : null;
+    const slip = target && maxDue && maxDue > target ? maxDue - target : 0;
+
+    /* ── milestone row ── */
+    const L = el('div','label'); L.style.height = 'var(--row-ms)';
+    const car = el('span','caret'); car.textContent = ms.collapsed ? '▸' : '▾';
+    car.onclick = () => { ms.collapsed = !ms.collapsed; render(); };
+    L.append(car, Object.assign(el('span','dot'), { style:`background:${ms.color}` }),
+             Object.assign(el('span','ms-name'), { textContent: ms.name }));
+    const meta = el('span','ms-meta');
+    const parts = [];
+    if (ms.total) parts.push(`${ms.done}/${ms.total}`);
+    if (ms.target) parts.push(MON[fromDay(target).getUTCMonth()] + ' ' + fromDay(target).getUTCDate());
+    meta.textContent = parts.join(' · ');
+    if (slip) meta.innerHTML += ` · <span class="over">${slip}d over</span>`;
+    L.append(meta);
+
+    const Ln = el('div','lane'); Ln.style.height = 'var(--row-ms)';
+    if (target){
+      const prev = MILESTONES[i-1];
+      const start = Math.max(ORIGIN, prev && prev.target ? toDay(prev.target)+1 : target-21);
+      const tr = el('div','track');
+      tr.style.cssText = `left:${x(start)}px;width:${w(start,target)}px;background:${hex(ms.color,.15)}`;
+      const f = el('b');
+      f.style.cssText = `width:${(ms.total ? ms.done/ms.total : 0)*100}%;background:${hex(ms.color,.85)}`;
+      tr.append(f); Ln.append(tr);
+      if (slip){
+        const sh = el('div','slip');
+        sh.style.cssText = `left:${x(target+1)}px;width:${w(target+1,maxDue)}px`;
+        Ln.append(sh);
+      }
+      const dia = el('div', 'dia' + (slip ? ' warn' : ''));
+      const complete = ms.total && ms.done === ms.total;
+      dia.style.cssText = `left:${xc(target)}px;border:1.5px solid ${ms.color};`
+                        + `background:${complete ? ms.color : hex(ms.color,.14)}`;
+      Ln.append(dia);
+    }
+    grid.append(L, Ln);
+
+    if (ms.collapsed) return;
+
+    /* ── task rows ── */
+    const scheduled = mine.filter(t => t.due)
+      .sort((a,b) => toDay(a.start || a.due) - toDay(b.start || b.due));
+
+    if (!scheduled.length){
+      const l2 = el('div','label'); l2.style.height = 'var(--row-task)';
+      l2.append(Object.assign(el('span','hint'),
+        { textContent: `${mine.length} unscheduled` }));
+      const n2 = el('div','lane'); n2.style.height = 'var(--row-task)';
+      grid.append(l2, n2);
+      return;
+    }
+
+    scheduled.forEach(t => {
+      const due = toDay(t.due), start = t.start ? toDay(t.start) : null;
+      const late = t.s !== 'DONE' && due < TODAY;
+      const st = barStyle(t.s, ms.color);
+
+      const l = el('div','label'); l.style.height = 'var(--row-task)';
+      l.append(Object.assign(el('span','pip'), { style:`background:${hex(ms.color,.75)}` }),
+               Object.assign(el('span','t-name'), { textContent:t.t }));
+      const dots = el('span','tdots');
+      t.tags.forEach(g => dots.append(Object.assign(el('span'), { style:`background:${TAG[g]}` })));
+      l.append(dots);
+      if (t.ck) l.append(Object.assign(el('span','prog'), { textContent:`${t.ck[0]}/${t.ck[1]}` }));
+
+      const ln = el('div','lane'); ln.style.height = 'var(--row-task)';
+      const bw = start ? w(start, due) : 0;
+
+      if (start && bw >= 16){
+        const b = el('div','bar');
+        b.style.cssText = `left:${x(start)}px;width:${bw}px;border:${st.border};background:${st.background}`;
+        b.title = `${t.t}\n${fmt(start)} → ${fmt(due)} · ${due-start+1}d\n${t.s}`;
+        if (t.ck && t.s === 'IN PROGRESS'){
+          b.append(Object.assign(el('div','fill'),
+            { style:`width:${t.ck[0]/t.ck[1]*100}%;background:${hex(ms.color,.30)}` }));
+        }
+        if (t.tags.includes('blocker')) b.append(el('div','cap-l'));
+        if (t.s === 'REVIEW') b.append(Object.assign(el('div','cap-r'), { style:`background:${ms.color}` }));
+        if (late) b.append(Object.assign(el('div','cap-r'), { style:'background:var(--danger)' }));
+        const inside = bw > t.t.length * 6.4 + 24;
+        if (inside) b.append(Object.assign(el('span','lbl'), { textContent:t.t, style:`color:${st.color}` }));
+        ln.append(b);
+        if (!inside) ln.append(outLabel(t, x(start) + bw + 8, late, due));
+      } else {
+        const mk = el('div','mark');
+        mk.style.cssText = `left:${xc(due)}px;border:1.5px solid ${late ? 'var(--danger)' : hex(ms.color,.75)};`
+                         + `background:${late ? 'rgba(240,87,111,.20)' : hex(ms.color,.18)}`;
+        mk.title = `${t.t}\ndue ${fmt(due)} · no start date\n${t.s}`;
+        ln.append(mk, outLabel(t, xc(due) + 10, late, due));
+      }
+      grid.append(l, ln);
+    });
+  });
+
+  /* tray */
+  const tray = document.getElementById('trayb'); tray.innerHTML = '';
+  const un = TASKS.filter(t => !t.due);
+  un.forEach(t => {
+    const ms = MILESTONES.find(m => m.id === t.m);
+    const c = el('div','tchip');
+    c.append(Object.assign(el('span','dot'), { style:`background:${ms.color}` }),
+             Object.assign(el('span','n'), { textContent:t.t }));
+    const dots = el('span','tdots');
+    t.tags.forEach(g => dots.append(Object.assign(el('span'), { style:`background:${TAG[g]}` })));
+    c.append(dots); tray.append(c);
+  });
+  document.getElementById('traycnt').textContent = un.length;
+}
+
+function outLabel(t, left, late, due){
+  const o = el('div', 'outlbl' + (t.s === 'DONE' ? ' is-done' : ''));
+  o.style.left = left + 'px';
+  o.textContent = t.t;
+  if (late) o.append(Object.assign(el('span','late'), { textContent:`${TODAY-due}d late` }));
+  return o;
+}
+
+/* helpers */
+function el(tag, cls){ const e = document.createElement(tag); if (cls) e.className = cls; return e; }
+function txt(c, s, left){ const e = document.createElement('div'); e.className = c; e.textContent = s; e.style.left = left + 'px'; return e; }
+function fmt(d){ const t = fromDay(d); return MON[t.getUTCMonth()] + ' ' + t.getUTCDate(); }
+function eachMonth(fn){ let d = ORIGIN; while (d <= END){ const t = fromDay(d);
+  if (t.getUTCDate() === 1) fn(d); d++; } }
+function eachWeek(fn){ for (let d = ORIGIN; d <= END; d += 7) fn(d); }
+
+function setZoom(z){
+  if (z === 'fit'){
+    const avail = document.getElementById('scroll').clientWidth - GUTTER - 2;
+    z = ['day','week','month','quarter'].find(k => DAYS * ZOOM[k] <= avail) || 'quarter';
+  }
+  dayWidth = ZOOM[z];
+  [...document.querySelectorAll('#zoom button')].forEach(b => b.classList.toggle('is-on', b.dataset.z === z));
+  render();
+}
+function scrollToToday(){
+  const s = document.getElementById('scroll');
+  s.scrollLeft = Math.max(0, x(TODAY) - s.clientWidth * 0.25);
+}
+document.querySelectorAll('#zoom button').forEach(b => b.onclick = () => setZoom(b.dataset.z));
+
+render();
+
+document.getElementById('legend').innerHTML = `
+<b>Reading this render.</b>
+Product default zoom is <code>week</code> scrolled to today; this reference opens at <code>month</code> so the whole project fits one screenshot — the zoom buttons work.<br>
+<b>Closed test (50 players)</b> shows the signature state: <i>Anti-cheat baseline</i> runs to Sep 29, past the Sep 22 target, so the track continues as a red hatch, the diamond takes the warning treatment, and the gutter reads <code>7d over</code>.<br>
+<b>Hitbox visualization tool</b> is a due-only task — a diamond, not a bar — and it is overdue, so it turns red and carries a day counter. <b>Live ops loop</b> and <b>No milestone</b> show the empty-group state: track only, <code>2 unscheduled</code> in the gutter.
+<b>Research &amp; signal</b> is complete, so it auto-collapsed with its track still drawn.<br>
+Bars, markers, and the axis are all positioned from <code>(dayIndex − origin) × dayWidth</code>. The maths in this file is the maths to ship.`;
+</script>
+</body>
+</html>

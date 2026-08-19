@@ -120,6 +120,13 @@
       "when": 1787700000000,
       "tag": "0016_nostalgic_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787800000000,
+      "tag": "0017_amazing_king_cobra",
+      "breakpoints": true
     }
   ]
 }

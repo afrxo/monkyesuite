@@ -255,6 +255,7 @@ function mapTask(
     createdAt: isoReq(t.createdAt),
     updatedAt: isoReq(t.updatedAt),
     dueAt: iso(t.dueAt),
+    startAt: iso(t.startAt),
     coverUrl:
       row.coverR2Key && row.coverMimeType
         ? coverUrlFor(row.coverMimeType, row.coverR2Key)
@@ -551,10 +552,38 @@ export function boardRoutes(): Hono<AppEnv> {
     const task = await withUser(userId, async (tx): Promise<Task> => {
       const { projectId } = await resolveItemAccess(tx, "task", id, userId);
       const [before] = await tx
-        .select({ title: tasks.title })
+        .select({
+          title: tasks.title,
+          startAt: tasks.startAt,
+          dueAt: tasks.dueAt,
+        })
         .from(tasks)
         .where(eq(tasks.id, id))
         .limit(1);
+      if (!before) throw notFound("No such task.");
+
+      // Schedule invariant, resolved against the stored row: dueAt is the
+      // anchor. A start without a due is invalid; clearing the due clears the
+      // start in the same statement (05 timeline).
+      const scheduleTouched = d.startAt !== undefined || d.dueAt !== undefined;
+      const nextDue =
+        d.dueAt !== undefined
+          ? d.dueAt
+            ? new Date(d.dueAt)
+            : null
+          : before.dueAt;
+      let nextStart =
+        d.startAt !== undefined
+          ? d.startAt
+            ? new Date(d.startAt)
+            : null
+          : before.startAt;
+      if (nextDue === null) nextStart = null;
+      if (nextStart && !nextDue)
+        throw validationError("A start date requires a due date.");
+      if (nextStart && nextDue && nextStart.getTime() > nextDue.getTime())
+        throw validationError("Start date must be on or before the due date.");
+
       await tx
         .update(tasks)
         .set({
@@ -565,9 +594,7 @@ export function boardRoutes(): Hono<AppEnv> {
             ? { milestoneId: d.milestoneId }
             : {}),
           ...(d.universeId !== undefined ? { universeId: d.universeId } : {}),
-          ...(d.dueAt !== undefined
-            ? { dueAt: d.dueAt ? new Date(d.dueAt) : null }
-            : {}),
+          ...(scheduleTouched ? { dueAt: nextDue, startAt: nextStart } : {}),
           ...(d.coverAttachmentId !== undefined
             ? { coverAttachmentId: d.coverAttachmentId }
             : {}),
@@ -592,16 +619,32 @@ export function boardRoutes(): Hono<AppEnv> {
           });
         }
       }
-      if (before) {
-        if (d.title !== undefined && d.title !== before.title) {
-          await logActivity(tx, {
-            taskId: id,
-            projectId,
-            actorId: userId,
-            kind: "title_change",
-            payload: { from: before.title, to: d.title },
-          });
-        }
+      if (d.title !== undefined && d.title !== before.title) {
+        await logActivity(tx, {
+          taskId: id,
+          projectId,
+          actorId: userId,
+          kind: "title_change",
+          payload: { from: before.title, to: d.title },
+        });
+      }
+      // One event per PATCH even when both dates move — a drag is one user
+      // action and should read as one line in Activity.
+      const startChanged =
+        (nextStart?.getTime() ?? null) !== (before.startAt?.getTime() ?? null);
+      const dueChanged =
+        (nextDue?.getTime() ?? null) !== (before.dueAt?.getTime() ?? null);
+      if (scheduleTouched && (startChanged || dueChanged)) {
+        await logActivity(tx, {
+          taskId: id,
+          projectId,
+          actorId: userId,
+          kind: "schedule_change",
+          payload: {
+            from: { startAt: iso(before.startAt), dueAt: iso(before.dueAt) },
+            to: { startAt: iso(nextStart), dueAt: iso(nextDue) },
+          },
+        });
       }
       const join = await taskJoinById(tx, id);
       if (!join) throw notFound("No such task.");

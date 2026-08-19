@@ -33,6 +33,7 @@ import {
 } from "../components/ui/dropdown-menu";
 import { api } from "../lib/api";
 import { ListView } from "./ListView/ListView";
+import { TimelineView } from "./TimelineView";
 import { milestoneColor } from "./milestone-color";
 import { shortTaskId } from "./short-id";
 import { tagChipClass } from "./tag";
@@ -283,10 +284,8 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
             List
           </ViewTab>
           <ViewTab
-            disabled
-            title="coming soon"
-            active={false}
-            onClick={() => {}}
+            active={view === "timeline"}
+            onClick={() => setView("timeline")}
           >
             Timeline
           </ViewTab>
@@ -367,7 +366,22 @@ export const BoardView = forwardRef<BoardViewHandle, Props>(function BoardView(
         </div>
       ) : null}
 
-      {view === "list" ? (
+      {view === "timeline" ? (
+        <TimelineView
+          board={board}
+          projectId={projectId}
+          projectSlug={projectSlug}
+          milestoneFilter={milestoneFilter}
+          tagFilter={tagFilter}
+          query={query}
+          showArchived={showArchived}
+          onOpenCard={(taskId) => onOpenCard?.(taskId)}
+          onClearFilters={() => {
+            setTagFilter(new Set());
+            setQuery("");
+          }}
+        />
+      ) : view === "list" ? (
         <ListView
           board={board}
           projectId={projectId}

@@ -135,6 +135,10 @@ export const patchTaskSchema = z
     assigneeIds: assigneeIds.optional(),
     universeId: universeLink.optional(),
     dueAt: z.string().datetime().nullable().optional(),
+    // Timeline schedule start. The cross-field invariant (startAt requires a
+    // dueAt, startAt ≤ dueAt) resolves against the stored row, so it lives in
+    // the handler, not here.
+    startAt: z.string().datetime().nullable().optional(),
     coverAttachmentId: z.string().uuid().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, "no fields to update");
@@ -276,9 +280,7 @@ const emptyProps = z.object({}).catchall(z.unknown());
 const headingProps = z
   .object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]) })
   .catchall(z.unknown());
-const checkProps = z
-  .object({ checked: z.boolean() })
-  .catchall(z.unknown());
+const checkProps = z.object({ checked: z.boolean() }).catchall(z.unknown());
 
 // Non-text block content shapes. Code stores raw text; image / divider have
 // no textual content and lean on props for state.
@@ -506,7 +508,9 @@ export const createChecklistItemSchema = z.object({
   prevId: z.string().uuid().nullable().optional(),
   nextId: z.string().uuid().nullable().optional(),
 });
-export type CreateChecklistItemInput = z.infer<typeof createChecklistItemSchema>;
+export type CreateChecklistItemInput = z.infer<
+  typeof createChecklistItemSchema
+>;
 
 export const patchChecklistItemSchema = z
   .object({
@@ -521,9 +525,15 @@ export type PatchChecklistItemInput = z.infer<typeof patchChecklistItemSchema>;
 export const attachmentUploadRequestSchema = z.object({
   fileName: z.string().min(1).max(255),
   mimeType: z.string().min(1).max(200),
-  sizeBytes: z.number().int().min(0).max(5 * 1024 * 1024 * 1024), // 5 GB hard cap
+  sizeBytes: z
+    .number()
+    .int()
+    .min(0)
+    .max(5 * 1024 * 1024 * 1024), // 5 GB hard cap
 });
-export type AttachmentUploadRequest = z.infer<typeof attachmentUploadRequestSchema>;
+export type AttachmentUploadRequest = z.infer<
+  typeof attachmentUploadRequestSchema
+>;
 
 export const attachmentConfirmSchema = z.object({
   attachmentId: z.string().uuid(),
