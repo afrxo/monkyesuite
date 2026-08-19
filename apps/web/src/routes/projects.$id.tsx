@@ -5,8 +5,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { ScopedError } from "../components/scoped";
 import { Skeleton } from "../components/Skeleton";
+import { ScopedError } from "../components/scoped";
 import { BlockEditor } from "../editor";
 import { api } from "../lib/api";
 import type { BoardViewHandle } from "../workspace/BoardView";
@@ -194,6 +194,7 @@ function WorkspacePage() {
             projectId={id}
             projectSlug={project.data.slug}
             onOpenCard={() => setDoc(null)}
+            onOpenDoc={setDoc}
           />
         </div>
       </div>
@@ -238,6 +239,10 @@ function WorkspacePage() {
                 projectId={id}
                 projectSlug={project.data.slug}
                 onOpenCard={() => setDoc(null)}
+                onOpenDoc={(v) => {
+                  setDoc(v);
+                  setMobileSheet(null);
+                }}
               />
             )}
           </MobileSheet>

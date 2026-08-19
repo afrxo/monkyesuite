@@ -29,3 +29,41 @@ export function extractTaskRefs(body: string): string[] {
   }
   return out;
 }
+
+// Doc references live in a note body as an opaque `[[doc:<uuid>]]` token — a
+// scheme that survives markdown storage untouched (marked leaves it as literal
+// text) and can't collide with the SG-### card grammar above. The composer's @
+// menu writes these; NoteItem extracts them into chips and rewrites them to a
+// readable `@Title` for prose display.
+const DOC_REF_RE =
+  /\[\[doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]\]/gi;
+
+export function docRefToken(docId: string): string {
+  return `[[doc:${docId}]]`;
+}
+
+// Extract doc uuids from a note body, deduped, in first-seen order.
+export function extractDocRefs(body: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of body.matchAll(DOC_REF_RE)) {
+    const id = m[1]?.toLowerCase();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+// Swap `[[doc:<uuid>]]` tokens for a readable `@Title` before the body is
+// handed to marked — the raw token would otherwise render as literal text.
+// `resolve` returns the doc's title, or undefined if it's been deleted.
+export function replaceDocRefs(
+  body: string,
+  resolve: (docId: string) => string | undefined,
+): string {
+  return body.replace(DOC_REF_RE, (_full, id: string) => {
+    const title = resolve(id.toLowerCase());
+    return `@${title ?? "doc"}`;
+  });
+}

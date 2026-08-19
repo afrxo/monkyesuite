@@ -195,6 +195,56 @@
 }
 .ws-note-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 
+/* Notes quick-capture composer. Reuses the global .bn-editor skin but tightens
+   it for the narrow rail: capped height with its own scroll, a single-line
+   resting state that grows as you type, and a custom empty-placeholder. */
+.ws-note-composer .bn-editor {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ws-note-composer .bn-editor .bn-block-group {
+  max-height: 40vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+/* No idle hover-stripe inside the composer — the card border already frames it,
+   and the stripe reads as clutter in a box this small. */
+.ws-note-composer .bn-editor .bn-block:hover > .bn-block-content,
+.ws-note-composer .bn-editor .bn-block > .bn-block-content:focus-within {
+  background-color: transparent;
+}
+.ws-note-composer .bn-editor .bn-block > .bn-block-content {
+  padding-inline: 0 !important;
+  margin-inline: 0;
+}
+/* Replace BlockNote's "Enter text or type '/' for commands" with our own copy.
+   Scope strictly to the single-empty-block / focused-empty states BN itself
+   paints — NOT the broad `:has(trailingBreak)` selector, which matches every
+   empty block and would stamp the placeholder onto each blank line. */
+.ws-note-composer .bn-block-content[data-is-empty-and-focused="true"]::after,
+.ws-note-composer .bn-block-content[data-is-only-empty-block]::after {
+  content: "Quick observation, dated call, or reminder…" !important;
+  color: var(--text-disabled) !important;
+}
+
+/* Rendered markdown inside a note row — same element styling as .ws-doc-preview
+   but tuned tighter for short bodies: smaller type, muted color, no runaway
+   leading/trailing margins. */
+.ws-note-md {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.ws-note-md > :first-child { margin-top: 0; }
+.ws-note-md > :last-child { margin-bottom: 0; }
+.ws-note-md h1,
+.ws-note-md h2,
+.ws-note-md h3 { font-size: 14px; margin: 0.7em 0 0.3em; }
+.ws-note-md p { margin: 0.4em 0; }
+.ws-note-md ul,
+.ws-note-md ol { margin: 0.4em 0; }
+
 /* Add-affordance revealed on section hover / focus-within */
 .ws-section .ws-section-add { opacity: 0; transition: opacity 120ms ease; }
 .ws-section:hover .ws-section-add,

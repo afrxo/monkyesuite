@@ -17,15 +17,8 @@ import type {
 } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import {
-  type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
 import { Icon } from "../components/Icon";
 import { toastError } from "../components/Toast";
 import {
@@ -34,9 +27,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Skeleton, useDelayedFlag } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { DatePicker } from "./DatePicker";
+import { GameSearchSelect } from "./GameSearchSelect";
 import { milestoneColor } from "./milestone-color";
 
 type Props = {
@@ -350,9 +343,10 @@ function DocSection({
   };
 
   const [addOpen, setAddOpen] = useState<"none" | "menu" | "folder">("none");
-  const [drag, setDrag] = useState<
-    { kind: "doc" | "folder"; id: string } | null
-  >(null);
+  const [drag, setDrag] = useState<{
+    kind: "doc" | "folder";
+    id: string;
+  } | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     if (typeof window === "undefined") return {};
     try {
@@ -402,12 +396,12 @@ function DocSection({
       let insertAt: number;
       if (v.nextId) {
         const nextSibling = destSiblings.find((d) => d.id === v.nextId);
-        insertAt = nextSibling
-          ? others.indexOf(nextSibling)
-          : others.length;
+        insertAt = nextSibling ? others.indexOf(nextSibling) : others.length;
       } else if (v.prevId) {
         const prevSibling = destSiblings.find((d) => d.id === v.prevId);
-        insertAt = prevSibling ? others.indexOf(prevSibling) + 1 : others.length;
+        insertAt = prevSibling
+          ? others.indexOf(prevSibling) + 1
+          : others.length;
       } else {
         // append to end of destination folder
         const lastInDest = destSiblings[destSiblings.length - 1];
@@ -445,8 +439,11 @@ function DocSection({
     onError: (err) => toastError(err),
   });
   const moveFolder = useMutation({
-    mutationFn: (v: { id: string; prevId: string | null; nextId: string | null }) =>
-      api.patchDocFolder(v.id, { prevId: v.prevId, nextId: v.nextId }),
+    mutationFn: (v: {
+      id: string;
+      prevId: string | null;
+      nextId: string | null;
+    }) => api.patchDocFolder(v.id, { prevId: v.prevId, nextId: v.nextId }),
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ["doc-folders", projectId] });
       const prev = qc.getQueryData<DocFolder[]>(["doc-folders", projectId]);
@@ -492,15 +489,14 @@ function DocSection({
   }
   const rootDocs = docsByFolder.get(null) ?? [];
 
-  const onDropInto = (
-    folderId: string | null,
-    beforeId: string | null,
-  ) => {
+  const onDropInto = (folderId: string | null, beforeId: string | null) => {
     if (!drag || drag.kind !== "doc") return;
     const dest = (docsByFolder.get(folderId) ?? []).filter(
       (d) => d.id !== drag.id,
     );
-    const idx = beforeId ? dest.findIndex((d) => d.id === beforeId) : dest.length;
+    const idx = beforeId
+      ? dest.findIndex((d) => d.id === beforeId)
+      : dest.length;
     const prevId = idx > 0 ? (dest[idx - 1]?.id ?? null) : null;
     const nextId = idx < dest.length ? (dest[idx]?.id ?? null) : null;
     const current = allDocs.find((d) => d.id === drag.id);
@@ -516,7 +512,9 @@ function DocSection({
   const onDropFolderBefore = (beforeId: string | null) => {
     if (!drag || drag.kind !== "folder") return;
     const list = allFolders.filter((f) => f.id !== drag.id);
-    const idx = beforeId ? list.findIndex((f) => f.id === beforeId) : list.length;
+    const idx = beforeId
+      ? list.findIndex((f) => f.id === beforeId)
+      : list.length;
     const prevId = idx > 0 ? (list[idx - 1]?.id ?? null) : null;
     const nextId = idx < list.length ? (list[idx]?.id ?? null) : null;
     moveFolder.mutate({ id: drag.id, prevId, nextId });
@@ -565,9 +563,7 @@ function DocSection({
             collapsed={isCollapsed}
             docCount={folderDocs.length}
             dragKind={drag?.kind ?? null}
-            onToggle={() =>
-              setCollapsed((c) => ({ ...c, [f.id]: !c[f.id] }))
-            }
+            onToggle={() => setCollapsed((c) => ({ ...c, [f.id]: !c[f.id] }))}
             onRename={(name) => renameFolder.mutate({ id: f.id, name })}
             onDelete={() => {
               if (
@@ -588,14 +584,10 @@ function DocSection({
                   doc={d}
                   active={d.id === activeId}
                   indent
-                  onClick={() =>
-                    onSelect(d.id === activeId ? null : d.id)
-                  }
+                  onClick={() => onSelect(d.id === activeId ? null : d.id)}
                   onDragStart={() => setDrag({ kind: "doc", id: d.id })}
                   onDropBefore={() => onDropInto(f.id, d.id)}
-                  onRename={(title) =>
-                    renameDoc.mutate({ id: d.id, title })
-                  }
+                  onRename={(title) => renameDoc.mutate({ id: d.id, title })}
                   onDelete={() => {
                     if (confirm(`Delete doc "${d.title}"?`))
                       deleteDoc.mutate(d.id);
@@ -1302,169 +1294,26 @@ function RefForm({
   onSubmit: (universeId: number, note: string) => void;
   onCancel: () => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
   const [selected, setSelected] = useState<PulseSearchResult | null>(null);
   const [note, setNote] = useState("");
-  const [open, setOpen] = useState(false);
-  const [cursor, setCursor] = useState(0);
   const noteRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (selected) return;
-    const t = setTimeout(() => setDebounced(query.trim()), 250);
-    return () => clearTimeout(t);
-  }, [query, selected]);
-
-  const search = useQuery({
-    queryKey: ["gameSearch", debounced],
-    queryFn: () => api.pulseSearch(debounced),
-    enabled: !selected && debounced.length >= 2,
-    staleTime: 15_000,
-  });
-
-  const results = useMemo(() => search.data ?? [], [search.data]);
-  const showDropdown =
-    open && !selected && debounced.length >= 2 && !search.isFetching;
-  // Only counts as loading once the fetch has run past the flash threshold —
-  // a cached term resolves under it and never shows a placeholder at all.
-  const showLoading = useDelayedFlag(
-    open && !selected && debounced.length >= 2 && search.isFetching,
-  );
-
-  useEffect(() => {
-    setCursor(0);
-  }, []);
-
-  const pick = (r: PulseSearchResult) => {
-    setSelected(r);
-    setQuery(r.name);
-    setOpen(false);
-    setTimeout(() => noteRef.current?.focus(), 0);
-  };
-
-  const clear = () => {
-    setSelected(null);
-    setQuery("");
-    setDebounced("");
-    setOpen(true);
-  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (selected) onSubmit(selected.id, note.trim());
   };
 
-  const onQueryKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape") {
-      if (open) {
-        setOpen(false);
-      } else {
-        onCancel();
-      }
-      return;
-    }
-    if (!showDropdown || results.length === 0) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setCursor((c) => Math.min(c + 1, results.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setCursor((c) => Math.max(c - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const r = results[cursor];
-      if (r) pick(r);
-    }
-  };
-
   return (
     <form onSubmit={submit} className="mt-1 flex flex-col gap-1 px-1.5">
-      <div className="relative">
-        <input
-          // biome-ignore lint/a11y/noAutofocus: focus what user opened
-          autoFocus
-          value={query}
-          onChange={(e) => {
-            const v = e.target.value;
-            setQuery(v);
-            if (selected && v !== selected.name) setSelected(null);
-            setOpen(true);
-            setCursor(0);
-          }}
-          onFocus={() => !selected && setOpen(true)}
-          onKeyDown={onQueryKey}
-          placeholder="Search game by name"
-          className="w-full rounded border border-border-1 bg-surface-1 px-2 py-1 pr-6 text-xs text-text-1 outline-none focus:border-text-5"
-        />
-        {selected ? (
-          <button
-            type="button"
-            onClick={clear}
-            aria-label="Clear selection"
-            className="absolute right-1 top-1/2 -translate-y-1/2 grid h-4 w-4 place-items-center rounded text-text-disabled hover:bg-white/[0.06] hover:text-text-1"
-          >
-            <Icon name="x" size={10} />
-          </button>
-        ) : null}
-        {showLoading ? (
-          <div className="absolute left-0 right-0 top-full z-20 mt-1 flex flex-col gap-2 rounded-md border border-border-1 bg-surface-1 p-2 shadow-lg">
-            {[86, 68, 74].map((w) => (
-              <div key={`gs-${w}`} className="flex items-center gap-2">
-                <Skeleton w={22} h={22} className="rounded" />
-                <Skeleton w={`${w}%`} h={10} />
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {showDropdown ? (
-          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-md border border-border-1 bg-surface-1 py-1 shadow-lg">
-            {results.length === 0 ? (
-              <div className="px-2 py-1.5 text-[11px] leading-tight text-text-disabled">
-                No tracked game matches. Scraper may not have picked it up yet.
-              </div>
-            ) : (
-              results.map((r, i) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onMouseEnter={() => setCursor(i)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(r);
-                  }}
-                  className={`flex w-full items-center gap-2 px-2 py-1 text-left text-xs ${
-                    i === cursor
-                      ? "bg-white/[0.05] text-text-1"
-                      : "text-text-3 hover:bg-white/[0.04]"
-                  }`}
-                >
-                  {r.thumbnail ? (
-                    <img
-                      src={r.thumbnail}
-                      alt=""
-                      className="h-4 w-4 shrink-0 rounded-sm object-cover"
-                    />
-                  ) : (
-                    <span className="grid h-4 w-4 shrink-0 place-items-center rounded-sm bg-white/[0.06] text-[10px] font-bold text-text-1">
-                      {r.name.slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">{r.name}</span>
-                    <span className="truncate text-[10px] text-text-disabled">
-                      {r.creatorName}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-[10px] tabular-nums text-text-disabled">
-                    {formatCcu(r.ccu)}
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        ) : null}
-      </div>
+      <GameSearchSelect
+        autoFocus
+        onPick={(r) => {
+          setSelected(r);
+          setTimeout(() => noteRef.current?.focus(), 0);
+        }}
+        onClear={() => setSelected(null)}
+        onEscapeEmpty={onCancel}
+      />
       <input
         ref={noteRef}
         value={note}
@@ -1492,10 +1341,4 @@ function RefForm({
       </div>
     </form>
   );
-}
-
-function formatCcu(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }
