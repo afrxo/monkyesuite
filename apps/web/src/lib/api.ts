@@ -32,6 +32,7 @@ import type {
   GameMetric,
   GameNote,
   GameStat,
+  IntelPayload,
   LifecycleEvent,
   LifecycleStage,
   LinkedNote,
@@ -160,6 +161,9 @@ export const api = {
     get<PulsePayload>(`/pulse${qs({ filter, sort })}`),
 
   pulseSearch: (q: string) => get<PulseSearchResult[]>(`/search${qs({ q })}`),
+
+  // Intel dashboard: latest batch-run per kind, grouped (specs/10-intel.md).
+  intel: () => get<IntelPayload>("/intel"),
 
   game: (id: number) => get<GameDetail>(`/games/${id}`),
   metrics: (

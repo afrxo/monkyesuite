@@ -224,6 +224,92 @@ export interface DiscoverItem {
   [key: string]: Json;
 }
 
+/* ------------------------------- intel ------------------------------------ */
+// Intel dashboard rows (specs/10-intel.md), written by the apps/intel batch
+// service into intel_insights and read back verbatim by GET /v1/intel. Every
+// score is an ESTIMATE synthesized from proxy signals — surfaces must present
+// it as such, never as fact. The headline carries the value; evidence is the
+// structured backing the page renders as plain text.
+
+export type IntelKind = "trend_confidence" | "movement" | "watch";
+
+// Score-component breakdown: how much each input moved this subject's score.
+// Rendered as text ("4/6 carriers rising · velocity top 8% of tags"), not viz.
+export interface IntelComponent {
+  name: string;
+  value: number;
+  weight: number;
+}
+
+export interface TrendConfidenceEvidence {
+  carriers: number;
+  risingCarriers: number;
+  avgVelocity: number;
+  avgSpike: number;
+  velocityPercentile: number; // this tag's avg velocity vs all tags, 0..1
+  components: IntelComponent[];
+}
+
+export interface MovementFactor {
+  kind: string; // update_shipped | active_event | sort_entry | stage_change | unexplained
+  detail: string; // pre-written sentence fragment
+}
+
+export interface MovementEvidence {
+  universeId: number;
+  name: string;
+  iconUrl: string | null;
+  deltaPct: number | null;
+  spikeScore: number | null;
+  latestCcu: number;
+  factors: MovementFactor[]; // ordered by attribution strength
+}
+
+export interface WatchEvidence {
+  universeId: number;
+  name: string;
+  iconUrl: string | null;
+  lifecycle: string | null;
+  latestCcu: number;
+  velocityPctInCohort: number | null;
+  likeRatio: number | null;
+  reasons: string[]; // plain sentences, strongest first
+}
+
+interface IntelInsightBase {
+  subjectType: "tag" | "game";
+  subjectKey: string;
+  rank: number;
+  score: number; // 0..1, kind-specific meaning
+  headline: string;
+  computedAt: string;
+}
+
+export interface TrendConfidenceInsight extends IntelInsightBase {
+  kind: "trend_confidence";
+  evidence: TrendConfidenceEvidence;
+}
+export interface MovementInsight extends IntelInsightBase {
+  kind: "movement";
+  evidence: MovementEvidence;
+}
+export interface WatchInsight extends IntelInsightBase {
+  kind: "watch";
+  evidence: WatchEvidence;
+}
+
+export type IntelInsight =
+  | TrendConfidenceInsight
+  | MovementInsight
+  | WatchInsight;
+
+export interface IntelPayload {
+  computedAt: string | null; // null → no intel run has landed yet (warm-up)
+  trendConfidence: TrendConfidenceInsight[];
+  movements: MovementInsight[];
+  watchlist: WatchInsight[];
+}
+
 // Standard error envelope (docs/api-contract.md "Error envelope").
 export interface ApiError {
   error: { code: string; message: string; retryAfter?: number };

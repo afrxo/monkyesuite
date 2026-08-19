@@ -9,6 +9,7 @@
 import type {
   DemandOverlay,
   DiscoverItem,
+  IntelPayload,
   FeedItem,
   GameDetail,
   GameEvent,
@@ -59,6 +60,7 @@ import {
   getTags,
 } from "./data.js";
 import { getDiscover } from "./discover.js";
+import { getIntel } from "./intel.js";
 import {
   HttpError,
   notFound,
@@ -107,6 +109,9 @@ const pulseCache = new TtlCache<PulsePayload>(30_000);
 // Search: 15s memo keeps user typing latency low without loading the DB. Keyed
 // by lowercased query.
 const searchCache = new TtlCache<PulseSearchResult[]>(15_000);
+// Intel: the batch service runs every ~30min, so 60s is effectively free
+// staleness — one indexed read per instance per minute at worst.
+const intelCache = new TtlCache<IntelPayload>(60_000);
 
 // Resolve a game or throw 404 — used before returning sub-resources so an
 // unknown universeId is a clean 404, not an empty list masquerading as data.
@@ -241,6 +246,18 @@ export function createApp() {
     );
     c.header("Cache-Control", "public, s-maxage=15, stale-while-revalidate=60");
     return c.json(results);
+  });
+
+  /* ------------------------------ intel ---------------------------------- */
+  // Latest intel run (specs/10-intel.md), grouped by kind. Freshness is the
+  // apps/intel cron cadence, not this cache — see intelCache above.
+  v1.get("/intel", async (c) => {
+    const payload = await intelCache.get("intel", () => getIntel());
+    c.header(
+      "Cache-Control",
+      "public, s-maxage=60, stale-while-revalidate=300",
+    );
+    return c.json(payload);
   });
 
   /* --------------------------- discovery -------------------------------- */

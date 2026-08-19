@@ -526,6 +526,46 @@ export const enrichJobs = pgTable(
 );
 
 /**
+ * intel_insights — scored intelligence rows written by the apps/intel batch
+ * service (specs/10-intel.md). GLOBAL, service-written, API-read. Each run
+ * upserts a ranked set per `kind`; the API reads only the latest run per kind,
+ * so history is retained briefly (the job prunes rows older than 14 days) but
+ * never queried hot. Derived-from-derived is allowed here by design: this is a
+ * presentation-layer synthesis over game_stats/tags, not a signal other
+ * derivations may consume — nothing downstream reads it back.
+ *
+ * `kind` is text, not an enum, on purpose: V2 kinds ("forecast", "lead_time")
+ * arrive without an ALTER TYPE migration; the API validates kinds with Zod.
+ * `subject_key` is polymorphic (tag "axis:slug" or a universeId as text per
+ * `subject_type`), so it is intentionally NOT a foreign key — same reasoning
+ * as enrich_jobs.target_id.
+ */
+export const intelInsights = pgTable(
+  "intel_insights",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(), // trend_confidence | movement | watch (V2: forecast, lead_time)
+    subjectType: text("subject_type").notNull(), // "tag" | "game"
+    subjectKey: text("subject_key").notNull(),
+    rank: integer("rank").notNull(), // 1-based position within its kind for the run
+    score: doublePrecision("score").notNull(), // 0..1, kind-specific meaning
+    headline: text("headline").notNull(), // one-sentence "why this matters", pre-written by the job
+    evidence: jsonb("evidence").notNull(), // per-kind structured components (see shared dto)
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // Idempotency: a re-run at the same computedAt overwrites, never duplicates.
+    uniqueIndex("intel_insights_kind_subject_computed_uq").on(
+      t.kind,
+      t.subjectKey,
+      t.computedAt,
+    ),
+    // The API's only read: latest computedAt per kind, then rank order.
+    index("intel_insights_kind_computed_idx").on(t.kind, t.computedAt),
+  ],
+);
+
+/**
  * game_notes — user-authored notes ON a tracked game. GLOBAL (follows the game
  * across every project), but access-controlled by author + visibility:
  *   shared  → readable by anyone with tracker access

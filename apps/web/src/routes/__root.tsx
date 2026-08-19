@@ -190,7 +190,9 @@ function Layout() {
   }
   const activeRoute = location.pathname.startsWith("/projects")
     ? "projects"
-    : undefined;
+    : location.pathname.startsWith("/discover")
+      ? "discover"
+      : undefined;
   return (
     <>
       <AppHeader activeRoute={activeRoute} />

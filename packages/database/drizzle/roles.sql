@@ -55,7 +55,8 @@ grant select, insert, update, delete on
   game_tags,
   demand_terms,
   demand_snapshots,
-  enrich_jobs
+  enrich_jobs,
+  intel_insights
 to monkye_app, monkye_service;
 
 -- ---------------------------------------------------------------------------
