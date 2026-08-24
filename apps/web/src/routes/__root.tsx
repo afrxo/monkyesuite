@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import AppHeader from "../components/AppHeader";
+import SearchModal from "../components/SearchModal";
 import ToastHost from "../components/toast/ToastHost";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { ApiError } from "../lib/api";
@@ -171,11 +172,33 @@ function RootComponent() {
           <AuthGate>
             <Layout />
           </AuthGate>
+          <GlobalSearch />
           <ToastHost />
         </RootDocument>
       </TooltipProvider>
     </QueryClientProvider>
   );
+}
+
+// Cmd-K / Ctrl-K opens the global game/creator search from anywhere in the app
+// except the Pulse feed (which owns its own search UI). Rendered once at the
+// root so remounts on route change don't reset its open state.
+function GlobalSearch() {
+  const [open, setOpen] = useState(false);
+  const location = useLocation();
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        // Pulse feed has its own SearchModal wired up; don't double-fire.
+        if (location.pathname === "/") return;
+        e.preventDefault();
+        setOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [location.pathname]);
+  return <SearchModal open={open} onOpenChange={setOpen} />;
 }
 
 function Layout() {

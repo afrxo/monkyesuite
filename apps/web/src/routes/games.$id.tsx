@@ -1,7 +1,9 @@
 import type {
   CohortSummary,
   CreatorPortfolio,
+  GameEvent,
   GameMetric,
+  LifecycleEvent,
   LifecycleEventType,
   MoverCard,
   PortfolioGame,
@@ -692,29 +694,8 @@ function GameDetailPage() {
         </Section>
       </div>
 
-      {events.length ? (
-        <section className="border-t border-border-1 px-6 py-8 lg:px-10">
-          <SectionHead title="Virtual events" />
-          <ul className="flex flex-col gap-2 text-sm">
-            {events.map((e) => (
-              <li
-                key={e.eventId}
-                className="rounded-lg border border-border-1 bg-surface-1/40 p-3"
-              >
-                <div className="font-medium text-text-2">
-                  {e.title ?? "Event"}
-                </div>
-                {e.subtitle ? (
-                  <div className="text-xs text-text-4">{e.subtitle}</div>
-                ) : null}
-                {e.tagline ? (
-                  <div className="mt-1 text-xs text-text-3">{e.tagline}</div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <UpdateCadence events={events} lifecycle={lifecycle} />
+
 
       <section className="border-t border-border-1 px-6 py-8 lg:px-10">
         <SectionHead title="Game notes" />
@@ -1141,6 +1122,124 @@ function WhatElseMoving({ games }: { games: MoverCard[] }) {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+function UpdateCadence({
+  events,
+  lifecycle,
+}: {
+  events: GameEvent[];
+  lifecycle: LifecycleEvent[];
+}) {
+  const upcoming = events
+    .filter((e) => e.startUtc && Date.parse(e.startUtc) > Date.now())
+    .sort((a, b) => Date.parse(a.startUtc ?? "") - Date.parse(b.startUtc ?? ""));
+  const updates = lifecycle
+    .filter((e) => e.type === "update_shipped")
+    .sort((a, b) => Date.parse(b.detectedAt) - Date.parse(a.detectedAt));
+
+  // Mean days between the ~last 8 shipped updates, if we have at least two.
+  let cadenceLine: string | null = null;
+  if (updates.length >= 2) {
+    const recent = updates.slice(0, 8);
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < recent.length - 1; i++) {
+      const a = Date.parse(recent[i]?.detectedAt ?? "");
+      const b = Date.parse(recent[i + 1]?.detectedAt ?? "");
+      if (a && b && a > b) {
+        sum += a - b;
+        n++;
+      }
+    }
+    if (n > 0) {
+      const meanDays = sum / n / DAY_MS;
+      cadenceLine = `Updates every ${meanDays.toFixed(1)}d avg`;
+    }
+  }
+  if (upcoming.length === 0 && updates.length === 0) return null;
+  return (
+    <section className="border-b border-border-1 px-6 py-6 lg:px-10">
+      <div className="mb-3 flex items-baseline gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-4">
+          Update cadence
+        </span>
+        {cadenceLine ? (
+          <span className="text-xs text-text-5">{cadenceLine}</span>
+        ) : null}
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-text-4">
+            Upcoming
+          </div>
+          {upcoming.length ? (
+            <ul className="flex flex-col gap-2 text-sm">
+              {upcoming.slice(0, 4).map((e) => {
+                const start = e.startUtc ? Date.parse(e.startUtc) : 0;
+                const diff = start - Date.now();
+                const days = Math.floor(diff / DAY_MS);
+                const hours = Math.floor((diff % DAY_MS) / HOUR_MS);
+                const when =
+                  days > 0
+                    ? `${days}d ${hours}h`
+                    : hours > 0
+                      ? `${hours}h`
+                      : "soon";
+                return (
+                  <li
+                    key={e.eventId}
+                    className="rounded-lg border border-border-1 bg-surface-1/40 p-3"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="font-medium text-text-2">
+                        {e.title ?? "Event"}
+                      </div>
+                      <div className="text-[11px] text-text-4 tabular-nums">
+                        in {when}
+                      </div>
+                    </div>
+                    {e.subtitle ? (
+                      <div className="text-xs text-text-4">{e.subtitle}</div>
+                    ) : null}
+                    {e.tagline ? (
+                      <div className="mt-1 text-xs text-text-3">
+                        {e.tagline}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <Empty>No scheduled events.</Empty>
+          )}
+        </div>
+        <div>
+          <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-text-4">
+            Recent updates
+          </div>
+          {updates.length ? (
+            <ul className="flex flex-col gap-1 text-sm">
+              {updates.slice(0, 8).map((u) => (
+                <li
+                  key={u.id}
+                  className="flex items-baseline justify-between text-text-3"
+                >
+                  <span className="text-text-2">Update shipped</span>
+                  <span className="text-[11px] text-text-5">
+                    {relTime(u.detectedAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Empty>No recorded updates.</Empty>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
