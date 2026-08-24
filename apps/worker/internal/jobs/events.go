@@ -58,9 +58,19 @@ func (j *eventsJob) Run(ctx context.Context, tick uint64) (sched.Result, error) 
 
 	var shipped []store.LifecycleEvent
 	total := 0
+	// Per-failure warns floor Railway's 500/sec log cap whenever Roblox
+	// rate-limits the batch — every universe in the fanout logs a line at the
+	// same instant. Aggregate: one representative sample + a count at the end.
+	var fetchFailed int
+	var fetchSampleErr error
+	var fetchSampleID int64
 	for _, r := range results {
 		if r.Err != nil {
-			slog.Warn("events: fetch failed", "universe", due[r.Index], "err", r.Err)
+			if fetchFailed == 0 {
+				fetchSampleErr = r.Err
+				fetchSampleID = due[r.Index]
+			}
+			fetchFailed++
 			continue
 		}
 		for _, e := range r.Value.events {
@@ -94,7 +104,12 @@ func (j *eventsJob) Run(ctx context.Context, tick uint64) (sched.Result, error) 
 	if err := j.d.Store.InsertLifecycleEvents(ctx, shipped); err != nil {
 		slog.Warn("events: lifecycle insert failed", "err", err)
 	}
-	slog.Info("events done", "tick", tick, "bucket", bucket, "games", len(due), "events", total, "shipped", len(shipped))
+	if fetchFailed > 0 {
+		slog.Warn("events: fetch failed batch", "count", fetchFailed,
+			"sample_universe", fetchSampleID, "sample_err", fetchSampleErr)
+	}
+	slog.Info("events done", "tick", tick, "bucket", bucket, "games", len(due),
+		"events", total, "shipped", len(shipped), "fetch_failed", fetchFailed)
 	return sched.Result{
 		RowsWritten: total + len(shipped),
 		Metrics:     eventsMetrics(bucket, len(due), total),
@@ -112,14 +127,18 @@ func eventsMetrics(bucket int64, gamesPolled, eventsUpserted int) map[string]any
 	}
 }
 
-// resolveThumbnail resolves the first thumbnail mediaId to a CDN URL.
+// resolveThumbnail resolves the first thumbnail mediaId to a CDN URL. The
+// per-event warn was moved to Debug because a rate-limited tick logs one per
+// event and floors Railway's 500/sec cap. Failures are non-fatal (the row
+// still upserts without a thumbnail), so the debug drop-in loses no signal
+// the system acts on.
 func (j *eventsJob) resolveThumbnail(ctx context.Context, row *store.GameEvent, e roblox.VirtualEvent) {
 	if len(e.Thumbnails) == 0 || e.Thumbnails[0].MediaID == 0 {
 		return
 	}
 	urls, err := j.d.Client.GetAssetThumbnails(ctx, []int64{e.Thumbnails[0].MediaID})
 	if err != nil {
-		slog.Warn("events: thumbnail resolve failed", "event", e.ID, "err", err)
+		slog.Debug("events: thumbnail resolve failed", "event", e.ID, "err", err)
 		return
 	}
 	if u, ok := urls[e.Thumbnails[0].MediaID]; ok {

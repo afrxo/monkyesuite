@@ -190,7 +190,13 @@ func fetchJSON[T any](ctx context.Context, c *Client, endpoint, url string, out 
 	// independent pools, an exhausted enrich budget skips enrich calls without
 	// ever touching the critical path's reserved tokens (§1.0).
 	if !c.limiter.Allow() {
-		c.log.Warn("roblox skip: tier budget spent", "endpoint", endpoint, "tier", c.tier)
+		// Per-call warn floods Railway's 500/sec log cap during rate saturation
+		// (hundreds of skips per tick). Skips are already counted by the shared
+		// telemetry counter (endpoint stat.Skipped) and surface in the admin
+		// panel + OTEL worker.job.counter{counter_name=skipped}, so the log
+		// line adds nothing observable that isn't already there. Kept at Debug
+		// for local runs where the flood isn't a concern.
+		c.log.Debug("roblox skip: tier budget spent", "endpoint", endpoint, "tier", c.tier)
 		return ErrRateLimited
 	}
 	var last error
@@ -235,7 +241,12 @@ func doOnce[T any](ctx context.Context, c *Client, endpoint, url string, out *T)
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	lat := time.Since(start).Milliseconds()
-	c.log.Info("roblox call", "endpoint", endpoint, "status", resp.StatusCode, "latency_ms", lat, "bytes", len(body))
+	// Per-call info log floods Railway's 500/sec cap during a fanout burst
+	// (snapshot alone issues 20+ concurrent calls). Latency + status are
+	// already recorded per-endpoint by the shared telemetry counter, and the
+	// admin panel groups them by ok/fail/skipped. Left at Debug so a local
+	// run with WORKER_LOG_LEVEL=debug still sees every call.
+	c.log.Debug("roblox call", "endpoint", endpoint, "status", resp.StatusCode, "latency_ms", lat, "bytes", len(body))
 	if err != nil {
 		return true, fmt.Errorf("read body: %w", err)
 	}
