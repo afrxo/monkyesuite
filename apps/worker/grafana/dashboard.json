@@ -1,0 +1,226 @@
+{
+  "title": "monkyesuite / worker",
+  "uid": "monkyesuite-worker",
+  "tags": ["monkyesuite", "worker"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "prom",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      },
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": "${prom}",
+        "query": "label_values(worker_job_runs_total, job_name)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Successful runs — last hour",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "sum(increase(worker_job_runs_total{job_status=\"ok\", job_name=~\"$job\"}[1h]))",
+          "legendFormat": "ok"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "steps": [{ "color": "green" }] } }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Failed runs — last hour",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "sum(increase(worker_job_runs_total{job_status=\"error\", job_name=~\"$job\"}[1h]))",
+          "legendFormat": "error"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Last successful snapshot",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "time() - max(timestamp(worker_job_runs_total{job_name=\"snapshot\", job_status=\"ok\"}))",
+          "legendFormat": "age (s)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 600 },
+              { "color": "red", "value": 900 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "game_metrics staleness",
+      "description": "Age of the most recent captured_at in game_metrics. > 15 min = worker is not landing rows.",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": "railway-postgres",
+      "targets": [
+        {
+          "rawSql": "select extract(epoch from (now() - max(captured_at))) as staleness_seconds from game_metrics",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 900 },
+              { "color": "red", "value": 1800 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Job run outcome (per 5 min)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "sum by (job_name, job_status) (rate(worker_job_runs_total{job_name=~\"$job\"}[5m]))",
+          "legendFormat": "{{job_name}} · {{job_status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Job duration (p95, ms)",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(worker_job_duration_ms_bucket{job_name=~\"$job\"}[5m])))",
+          "legendFormat": "{{job_name}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Snapshot yield (real / tracked)",
+      "description": "Fraction of tracked games that landed a real metric each run. Sustained < 0.9 = Roblox call failures.",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "sum(rate(worker_job_counter_total{job_name=\"snapshot\", counter_name=\"real\"}[15m])) / sum(rate(worker_job_counter_total{job_name=\"snapshot\", counter_name=\"tracked\"}[15m]))",
+          "legendFormat": "yield"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.7 },
+              { "color": "green", "value": 0.9 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Snapshot unknown-from-Roblox drops",
+      "description": "Rows Roblox returned for universes not in games — dropped to avoid FK violation. Sudden spike = a merged/relocated cluster.",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "sum(rate(worker_job_counter_total{job_name=\"snapshot\", counter_name=\"unknown_from_roblox\"}[5m]))",
+          "legendFormat": "drops/s"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Rows written per job",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "sum by (job_name) (rate(worker_job_rows_written_total{job_name=~\"$job\"}[15m]))",
+          "legendFormat": "{{job_name}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "wps" } }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Free-form counters (snapshot carried + creators, discover appearances, …)",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": "${prom}",
+      "targets": [
+        {
+          "expr": "sum by (job_name, counter_name) (rate(worker_job_counter_total{job_name=~\"$job\", counter_name!~\"tracked|real|unknown_from_roblox\"}[15m]))",
+          "legendFormat": "{{job_name}} · {{counter_name}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    }
+  ]
+}

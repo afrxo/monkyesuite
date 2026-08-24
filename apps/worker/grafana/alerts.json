@@ -1,0 +1,165 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "monkyesuite-worker",
+      "folder": "monkyesuite",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "worker-snapshot-stalled",
+          "title": "Snapshot has not succeeded in 15 minutes",
+          "condition": "C",
+          "for": "0m",
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "annotations": {
+            "summary": "Snapshot has not landed a successful run in the last 15 minutes.",
+            "description": "The critical scraping path is dark. game_metrics is not receiving fresh rows; every downstream signal is derived from stale data. Check apps/worker cron logs (Railway → monkye-snapshot → logs) and job_runs.error for the most recent snapshot row."
+          },
+          "labels": { "severity": "page" },
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 900, "to": 0 },
+              "datasourceUid": "$prom",
+              "model": {
+                "refId": "A",
+                "expr": "sum(increase(worker_job_runs_total{job_name=\"snapshot\", job_status=\"ok\"}[15m]))",
+                "instant": true
+              }
+            },
+            {
+              "refId": "C",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "-100",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "conditions": [{ "evaluator": { "type": "lt", "params": [1] } }],
+                "expression": "A"
+              }
+            }
+          ]
+        },
+        {
+          "uid": "worker-game-metrics-stale",
+          "title": "game_metrics.captured_at is more than 15 minutes stale",
+          "condition": "C",
+          "for": "5m",
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "annotations": {
+            "summary": "Ground truth is stale: game_metrics has not received a new row in > 15 min.",
+            "description": "This is the same page as worker-snapshot-stalled from the DB side. If both fire together, snapshot is broken. If only this one fires, snapshot is writing but the row isn't landing (RLS regression, connection pool, disk, …)."
+          },
+          "labels": { "severity": "page" },
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "datasourceUid": "railway-postgres",
+              "model": {
+                "refId": "A",
+                "rawSql": "select extract(epoch from (now() - max(captured_at))) as v from game_metrics",
+                "format": "table"
+              }
+            },
+            {
+              "refId": "C",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "-100",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "conditions": [{ "evaluator": { "type": "gt", "params": [900] } }],
+                "expression": "A"
+              }
+            }
+          ]
+        },
+        {
+          "uid": "worker-snapshot-yield-low",
+          "title": "Snapshot yield below 90% for 30 minutes",
+          "condition": "C",
+          "for": "30m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "annotations": {
+            "summary": "Snapshot is landing metrics for < 90% of tracked games.",
+            "description": "Sustained low yield means Roblox is refusing a large share of batches (rate cap, bot challenge, contract drift). Rows still land, so this warns rather than pages — but if unattended it hides trend signal."
+          },
+          "labels": { "severity": "warn" },
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 1800, "to": 0 },
+              "datasourceUid": "$prom",
+              "model": {
+                "refId": "A",
+                "expr": "sum(rate(worker_job_counter_total{job_name=\"snapshot\", counter_name=\"real\"}[30m])) / sum(rate(worker_job_counter_total{job_name=\"snapshot\", counter_name=\"tracked\"}[30m]))",
+                "instant": true
+              }
+            },
+            {
+              "refId": "C",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "-100",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "conditions": [{ "evaluator": { "type": "lt", "params": [0.9] } }],
+                "expression": "A"
+              }
+            }
+          ]
+        },
+        {
+          "uid": "worker-job-errors",
+          "title": "Any job's error rate > 0 sustained 15 min",
+          "condition": "C",
+          "for": "15m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "annotations": {
+            "summary": "A job has been erroring continuously for 15 min.",
+            "description": "One-off errors do not fire. Sustained means the job cannot recover on its own — read job_runs.error for the details and jump to Railway logs for the exception."
+          },
+          "labels": { "severity": "warn" },
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 900, "to": 0 },
+              "datasourceUid": "$prom",
+              "model": {
+                "refId": "A",
+                "expr": "sum by (job_name) (rate(worker_job_runs_total{job_status=\"error\"}[15m])) > bool 0",
+                "instant": true
+              }
+            },
+            {
+              "refId": "C",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "-100",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "conditions": [{ "evaluator": { "type": "gt", "params": [0] } }],
+                "expression": "A"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
