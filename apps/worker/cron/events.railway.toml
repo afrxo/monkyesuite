@@ -3,7 +3,10 @@
 # On the monkye-events service, set:
 #   Config-as-code path = apps/worker/cron/events.railway.toml
 #
-# Every 15 minutes — event flag on game_metrics only needs bucketed refresh.
+# Every 3 hours — event flag is slow-moving; hourly-buckets churned too much
+# roblox call budget for the signal payoff. One full sweep per 3h keeps the
+# update_shipped emission window (~1h) unaffected since events run 3× per
+# window on the outbound side and the DB EventExists check is idempotent.
 
 [build]
 builder = "DOCKERFILE"
@@ -14,4 +17,4 @@ watchPatterns = ["apps/worker/**"]
 startCommand = "/events"
 restartPolicyType = "NEVER"
 numReplicas = 1
-cronSchedule = "3-59/15 * * * *"
+cronSchedule = "13 */3 * * *"

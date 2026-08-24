@@ -21,7 +21,7 @@ service on Railway with the same name.
 | ---------------------- | ------------------ | ------------------------------------- |
 | `monkye-snapshot`      | `*/5 * * * *`      | Chains snapshot → derive              |
 | `monkye-discover`      | `2-59/5 * * * *`   | Offset 2m from snapshot               |
-| `monkye-events`        | `3-59/15 * * * *`  | Every 15m                             |
+| `monkye-events`        | `13 */3 * * *`     | Every 3h                              |
 | `monkye-icon-backfill` | `27 * * * *`       | Hourly                                |
 | `monkye-enrich`        | `17 3 * * *`       | Daily 03:17 UTC                       |
 | `monkye-trend-drift`   | `37 4 * * *`       | Daily 04:37 UTC                       |

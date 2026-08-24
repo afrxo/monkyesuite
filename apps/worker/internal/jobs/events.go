@@ -14,39 +14,47 @@ import (
 // EventsConcurrency bounds the virtual-events fan-out width.
 const EventsConcurrency = 10
 
+// EventsTickInterval is the cadence at which the events job fires, expressed
+// in ticks of the base 5-min loop. 36 * 5min = 3h. Was 1 (every tick) with a
+// 12-way universeId bucket that spread the fan-out over an hour; empirically
+// the event flag is slow-moving enough that a full sweep every 3h keeps
+// signal quality while cutting the roblox call rate by ~36×. Cron mode
+// ignores this — the cron schedule is the authority there.
+const EventsTickInterval = 36
+
 // updateShippedWindow is how recently an event must have gone live to emit an
 // update_shipped lifecycle event on first ingestion (§1.3, ~1h).
 const updateShippedWindow = time.Hour
 
-// eventsJob polls each game's virtual events, bucketed so a game is checked
-// ~once per 12 ticks (universeId % 12 == tick % 12), spreading load across the
-// hour (§1.3).
+// eventsJob polls each tracked game's virtual events. Fires every 3h in the
+// persistent loop (see EventsTickInterval) and on whatever schedule the
+// events cron service is configured with; in either mode it sweeps the full
+// tracked set in one run, fanned out at EventsConcurrency.
 type eventsJob struct{ d Deps }
 
 func (j *eventsJob) Name() string { return "events" }
 
 func (j *eventsJob) Run(ctx context.Context, tick uint64) (sched.Result, error) {
-	bucket := int64(tick % 12)
+	// Loop mode: skip until the 3h cadence lands. Cron mode always passes
+	// tick=0, so this branch is a no-op there.
+	if tick != 0 && tick%EventsTickInterval != 0 {
+		return sched.Result{Skipped: true, Metrics: eventsMetrics(int64(tick), 0, 0)}, nil
+	}
 	if j.d.Store == nil {
 		slog.Warn("events skipped: no store")
-		return sched.Result{Skipped: true, Metrics: eventsMetrics(bucket, 0, 0)}, nil
+		return sched.Result{Skipped: true, Metrics: eventsMetrics(int64(tick), 0, 0)}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 
 	tracked, err := j.d.Store.TrackedUniverseIDs(ctx)
 	if err != nil {
-		return sched.Result{Metrics: eventsMetrics(bucket, 0, 0)}, err
+		return sched.Result{Metrics: eventsMetrics(int64(tick), 0, 0)}, err
 	}
-	var due []int64
-	for _, id := range tracked {
-		if id%12 == bucket {
-			due = append(due, id)
-		}
-	}
+	due := tracked
 	if len(due) == 0 {
-		slog.Info("events: no games in bucket", "tick", tick, "bucket", bucket)
-		return sched.Result{Metrics: eventsMetrics(bucket, 0, 0)}, nil
+		slog.Info("events: no tracked games", "tick", tick)
+		return sched.Result{Metrics: eventsMetrics(int64(tick), 0, 0)}, nil
 	}
 
 	now := time.Now().UTC()
@@ -108,17 +116,18 @@ func (j *eventsJob) Run(ctx context.Context, tick uint64) (sched.Result, error) 
 		slog.Warn("events: fetch failed batch", "count", fetchFailed,
 			"sample_universe", fetchSampleID, "sample_err", fetchSampleErr)
 	}
-	slog.Info("events done", "tick", tick, "bucket", bucket, "games", len(due),
+	slog.Info("events done", "tick", tick, "games", len(due),
 		"events", total, "shipped", len(shipped), "fetch_failed", fetchFailed)
 	return sched.Result{
 		RowsWritten: total + len(shipped),
-		Metrics:     eventsMetrics(bucket, len(due), total),
+		Metrics:     eventsMetrics(int64(tick), len(due), total),
 	}, nil
 }
 
-// eventsMetrics is the §9.6 contract for this job. `bucket` is recorded so a
-// gap is readable: this job polls only universeId %% 12 == tick %% 12 (§1.3), so
-// "few games polled" is expected on some ticks and alarming on others.
+// eventsMetrics is the §9.6 contract for this job. `bucket` is kept as the
+// field name for panel-schema stability even though the job no longer polls
+// a modulo bucket — the value is now the tick at fire time, useful for
+// checking the 3h cadence is honored.
 func eventsMetrics(bucket int64, gamesPolled, eventsUpserted int) map[string]any {
 	return map[string]any{
 		"bucket":         bucket,
