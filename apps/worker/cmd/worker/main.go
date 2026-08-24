@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"monkyesuite/worker/internal/jobs"
+	wotel "monkyesuite/worker/internal/otel"
 	"monkyesuite/worker/internal/roblox"
 	"monkyesuite/worker/internal/sched"
 	"monkyesuite/worker/internal/store"
@@ -29,6 +30,19 @@ func main() {
 	// Cancel the whole loop on SIGINT/SIGTERM (Railway sends SIGTERM on deploy).
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// OTEL exporters run alongside the loop from tick 0. Failure to init logs
+	// and continues with a no-op provider — telemetry is never allowed to take
+	// scraping down. Shutdown runs on the way out to flush any pending batch.
+	shutdownOtel, err := wotel.Init(ctx)
+	if err != nil {
+		slog.Warn("otel init failed; continuing without telemetry", "err", err)
+	}
+	defer func() {
+		if err := shutdownOtel(context.Background()); err != nil {
+			slog.Warn("otel shutdown", "err", err)
+		}
+	}()
 
 	// DATABASE_URL is the SERVICE role (RLS bypass) — the worker writes only
 	// global scraped tables. Absent → run with no store (jobs log and skip).

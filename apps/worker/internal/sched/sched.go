@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"time"
 
+	wotel "monkyesuite/worker/internal/otel"
 	"monkyesuite/worker/internal/telemetry"
 )
 
@@ -239,7 +240,8 @@ func (l *Loop) runAll(ctx context.Context, tick uint64, js []Job) {
 // missing row is indistinguishable from a job that never ran.
 func (l *Loop) runOne(ctx context.Context, tick uint64, j Job) error {
 	ctr := telemetry.NewCounter()
-	runCtx := telemetry.WithCounter(ctx, ctr)
+	spanCtx, span := wotel.StartJobSpan(ctx, j.Name(), tick)
+	runCtx := telemetry.WithCounter(spanCtx, ctr)
 
 	started := time.Now().UTC()
 	res, err := j.Run(runCtx, tick)
@@ -254,13 +256,25 @@ func (l *Loop) runOne(ctx context.Context, tick uint64, j Job) error {
 		status = "skipped"
 	}
 
+	durMs := finished.Sub(started).Milliseconds()
+	wotel.RecordJobRun(spanCtx, j.Name(), status, durMs, int64(res.RowsWritten))
+	// Fold the job's free-form metrics (snapshot.real, snapshot.carried, …)
+	// into per-name counters so Grafana can plot them without knowing about
+	// individual jobs. Numeric values only — anything else is dropped.
+	for name, v := range res.Metrics {
+		if n, ok := metricInt(v); ok {
+			wotel.RecordCounter(spanCtx, j.Name(), name, n)
+		}
+	}
+	wotel.EndJobSpan(span, status, err)
+
 	run := Run{
 		Job:         j.Name(),
 		Tick:        tick,
 		Tier:        TierOf(j),
 		StartedAt:   started,
 		FinishedAt:  finished,
-		DurationMs:  int(finished.Sub(started).Milliseconds()),
+		DurationMs:  int(durMs),
 		Status:      status,
 		RowsWritten: res.RowsWritten,
 		Metrics:     ctr.Fold(res.Metrics),
@@ -270,6 +284,25 @@ func (l *Loop) runOne(ctx context.Context, tick uint64, j Job) error {
 	}
 	l.record(ctx, run)
 	return err
+}
+
+// metricInt coerces the free-form value carried in Result.Metrics to an int64.
+// Jobs record integers as int, int64, or float64 (from JSON). Non-numeric
+// values (strings, maps) are ignored — those aren't counters anyway.
+func metricInt(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int32:
+		return int64(n), true
+	case uint64:
+		return int64(n), true
+	case float64:
+		return int64(n), true
+	}
+	return 0, false
 }
 
 // record persists a run, tolerating a missing recorder. A telemetry write that
