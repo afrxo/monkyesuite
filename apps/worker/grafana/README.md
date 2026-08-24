@@ -3,25 +3,21 @@
 Two artifacts in this dir:
 
 - [`dashboard.json`](./dashboard.json) — worker overview dashboard.
-- [`alerts.json`](./alerts.json) — alert rules (paging + warning).
+- [`alerts.md`](./alerts.md) — alert rules with click-by-click steps.
 
-## Import
+## Import order
 
-### Dashboard
+1. Add the Postgres datasource (below).
+2. Import the dashboard (below).
+3. Create the alert rules following [`alerts.md`](./alerts.md).
+
+## Dashboard
 
 1. Grafana Cloud → Dashboards → New → Import.
 2. Upload `dashboard.json`.
-3. Data sources: pick the default `grafanacloud-<stack>-prom` for metrics
-   and the Postgres data source you'll create below.
-
-### Alerts
-
-1. Alerting → Alert rules → New folder `monkyesuite`.
-2. For each rule in `alerts.json`, create it via the UI or the Alerting
-   API (`POST /api/v1/provisioning/alert-rules`). File is provisioning
-   format compatible with the API.
-3. Notification: pick the contact point that pages you (PagerDuty,
-   Grafana OnCall, Slack — whichever you already use).
+3. On the import screen pick your Prometheus datasource for `DS_PROM`
+   and the Postgres datasource for `DS_PG`. The dashboard uses variables,
+   not baked UIDs, so it moves cleanly between stacks.
 
 ## Postgres data source (one-time)
 
