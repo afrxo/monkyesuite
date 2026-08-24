@@ -77,10 +77,20 @@ func (j *snapshotJob) Run(ctx context.Context, tick uint64) (sched.Result, error
 			return batchResult{games: games, votes: votes}, nil
 		})
 
+	// Roblox occasionally returns games for merged/relocated universeIds that
+	// were not in the request — inserting metrics for those breaks the FK to
+	// games.universe_id, aborting the whole batch. Filter response rows against
+	// the requested set. Unknown universes get logged for observability.
+	trackedSet := make(map[int64]struct{}, len(tracked))
+	for _, id := range tracked {
+		trackedSet[id] = struct{}{}
+	}
+
 	var metrics []store.Metric
 	var creators []store.Creator
 	var metas []store.GameMeta
 	seenThisTick := map[int64]struct{}{}
+	var unknownFromRoblox int
 
 	for i, r := range results {
 		if r.Err != nil {
@@ -92,6 +102,10 @@ func (j *snapshotJob) Run(ctx context.Context, tick uint64) (sched.Result, error
 			voteByID[v.UniverseID] = v
 		}
 		for _, g := range r.Value.games {
+			if _, ok := trackedSet[g.UniverseID]; !ok {
+				unknownFromRoblox++
+				continue
+			}
 			seenThisTick[g.UniverseID] = struct{}{}
 			raw, _ := json.Marshal(g)
 			m := store.Metric{
@@ -135,7 +149,9 @@ func (j *snapshotJob) Run(ctx context.Context, tick uint64) (sched.Result, error
 
 	carried := j.carryForward(ctx, tracked, seenThisTick, now)
 	slog.Info("snapshot done", "tick", tick, "tracked", len(tracked),
-		"fetched", len(seenThisTick), "landed", len(metrics), "carried_forward", carried, "new_creators", len(creators))
+		"fetched", len(seenThisTick), "landed", len(metrics),
+		"carried_forward", carried, "new_creators", len(creators),
+		"unknown_from_roblox", unknownFromRoblox)
 	return sched.Result{
 		RowsWritten: len(metrics) + carried,
 		Metrics:     snapshotMetrics(len(tracked), len(metrics), carried),

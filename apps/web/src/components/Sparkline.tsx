@@ -19,10 +19,15 @@ export default function Sparkline({
   color,
   showAxis = false,
 }: SparklineProps) {
-  const safe = data.length > 0 ? data : [0];
-  const max = Math.max(...safe, 1);
-  const barW =
-    safe.length > 1 ? (width - (safe.length - 1) * 2) / safe.length : width;
+  // Fewer than 2 points is not a sparkline — the previous fallback drew a
+  // single 2px bar spanning the full width, which reads as a straight line
+  // and silently masks upstream outages (empty spark from the API). Render
+  // an empty box of the same footprint so layout stays intact.
+  if (data.length < 2) {
+    return <div style={{ width, height }} aria-hidden="true" />;
+  }
+  const max = Math.max(...data, 1);
+  const barW = (width - (data.length - 1) * 2) / data.length;
   const stroke = color ?? "var(--text-3)";
 
   return (
@@ -42,7 +47,7 @@ export default function Sparkline({
           stroke="var(--border-3)"
           strokeWidth="1"
         />
-        {safe.map((v, i) => {
+        {data.map((v, i) => {
           const h = Math.max(2, (v / max) * (height - 2));
           const x = i * (barW + 2);
           const y = height - h;
