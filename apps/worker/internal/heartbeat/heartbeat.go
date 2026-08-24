@@ -1,18 +1,22 @@
 // Package heartbeat pings healthchecks.io after each job run so a missed
 // tick surfaces as an alert without any log-scraping or dashboard config.
 //
-// One env var: HEALTHCHECKS_PING_KEY (the project-level ping key from
-// healthchecks.io). Checks are auto-created on first ping via the ping
-// key's slug scheme:
+// One env var per job — the ping URL healthchecks.io shows on each check's
+// page. Convention: HC_URL_<UPPER_JOB>, with dashes replaced by underscores.
 //
-//	success → https://hc-ping.com/<key>/<job>
-//	failure → https://hc-ping.com/<key>/<job>/fail
-//	start   → https://hc-ping.com/<key>/<job>/start   (optional, not used)
+//	HC_URL_SNAPSHOT       → https://hc-ping.com/<uuid>
+//	HC_URL_DISCOVER       → https://hc-ping.com/<uuid>
+//	HC_URL_DERIVE         → https://hc-ping.com/<uuid>
+//	HC_URL_EVENTS         → https://hc-ping.com/<uuid>
+//	HC_URL_ENRICH         → https://hc-ping.com/<uuid>
+//	HC_URL_DEMAND         → https://hc-ping.com/<uuid>
+//	HC_URL_ICON_BACKFILL  → https://hc-ping.com/<uuid>
+//	HC_URL_TREND_DRIFT    → https://hc-ping.com/<uuid>
 //
-// Fire-and-forget: a ping failure never fails a job — the alert is what
-// tells you the worker is down, so blocking on the alerter is the wrong
-// direction. A 2s timeout guards against a hung healthchecks.io
-// endpoint stalling the tick.
+// success appends nothing, failure appends /fail. Fire-and-forget: a ping
+// failure never fails a job — the alert is what tells you the worker is
+// down, so blocking on the alerter is the wrong direction. A 2s timeout
+// guards against a hung healthchecks.io endpoint stalling the tick.
 package heartbeat
 
 import (
@@ -20,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -27,11 +32,10 @@ import (
 // "error"; anything else is coerced to "ok" so a caller doesn't
 // accidentally silence a check by passing "skipped".
 func Ping(name, status string) {
-	key := os.Getenv("HEALTHCHECKS_PING_KEY")
-	if key == "" {
+	url := os.Getenv(envKey(name))
+	if url == "" {
 		return
 	}
-	url := "https://hc-ping.com/" + key + "/" + name
 	if status == "error" {
 		url += "/fail"
 	}
@@ -50,4 +54,11 @@ func Ping(name, status string) {
 		return
 	}
 	_ = resp.Body.Close()
+}
+
+// envKey maps a job name to its env var. Dashes become underscores because
+// env var names cannot contain dashes; upper-case for shell convention.
+// trend-drift → HC_URL_TREND_DRIFT.
+func envKey(name string) string {
+	return "HC_URL_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 }

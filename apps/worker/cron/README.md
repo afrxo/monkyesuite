@@ -9,10 +9,10 @@ service on Railway with the same name.
 2. Settings → Config-as-code path: `apps/worker/cron/<name>.railway.toml`.
 3. Variables — set:
    - `DATABASE_URL` — service role (`monkye_service`, `BYPASSRLS`).
-   - `HEALTHCHECKS_PING_KEY` — the ping key from healthchecks.io
-     (Project Settings → Ping Key). Same value across every service;
-     each job pings a distinct slug so healthchecks.io auto-creates
-     one check per job.
+   - `HC_URL_<JOBNAME>` — the ping URL healthchecks.io shows on the
+     check's page. Uppercase, dashes → underscores. Only the entry
+     for this cron's job needs to be set on this service; the others
+     will be ignored.
    - `YOUTUBE_API_KEY` (demand only).
 4. Deploy. Cron schedule is honored on next scheduled fire; the initial
    deploy does not run the entrypoint.
