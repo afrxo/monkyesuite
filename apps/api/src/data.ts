@@ -726,6 +726,50 @@ export async function getMovers(
 }
 
 /**
+ * getAudienceRhythm — 7×24 UTC average-CCU grid over the last 28 days of raw
+ * game_metrics. Aggregation lives entirely in SQL (extract(dow) / extract(hour)
+ * + avg) so the worker never materializes the full metric window in memory —
+ * matches CLAUDE.md's CPU strategy for derived reads.
+ */
+export async function getAudienceRhythm(
+  universeId: number,
+  windowDays = 28,
+): Promise<import("@monkyesuite/shared").AudienceRhythm | null> {
+  const cutoff = new Date(Date.now() - windowDays * 86_400_000);
+  const rows = await db
+    .select({
+      dow: sql<number>`extract(dow from ${gameMetrics.capturedAt})::int`,
+      hour: sql<number>`extract(hour from ${gameMetrics.capturedAt})::int`,
+      ccu: sql<number>`avg(${gameMetrics.playing})::float`,
+    })
+    .from(gameMetrics)
+    .where(
+      and(
+        eq(gameMetrics.universeId, universeId),
+        gte(gameMetrics.capturedAt, cutoff),
+      ),
+    )
+    .groupBy(
+      sql`extract(dow from ${gameMetrics.capturedAt})`,
+      sql`extract(hour from ${gameMetrics.capturedAt})`,
+    );
+
+  if (rows.length === 0) return null;
+
+  const cells = new Array<number>(168).fill(0);
+  let peak = { dow: 0, hour: 0, ccu: -Infinity };
+  let trough = { dow: 0, hour: 0, ccu: Infinity };
+  for (const r of rows) {
+    const idx = r.dow * 24 + r.hour;
+    cells[idx] = r.ccu;
+    if (r.ccu > peak.ccu) peak = { dow: r.dow, hour: r.hour, ccu: r.ccu };
+    if (r.ccu < trough.ccu) trough = { dow: r.dow, hour: r.hour, ccu: r.ccu };
+  }
+  if (peak.ccu === -Infinity) return null;
+  return { cells, peak, trough, windowDays };
+}
+
+/**
  * getCohort — the game's cohort percentile summary. Reads cohort_stats
  * directly (already denormalized by derive); returns null when the game has no
  * cohort row yet (too new, or its cohort was too small to compute against).

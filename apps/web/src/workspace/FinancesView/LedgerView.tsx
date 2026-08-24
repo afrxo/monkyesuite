@@ -8,13 +8,14 @@ import type {
   FinanceCategory,
   FinanceKind,
   FinanceTransaction,
-  RevenueSplit,
 } from "@monkyesuite/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toastError } from "../../components/Toast";
 import { api } from "../../lib/api";
 import { fmtRobux, fmtUsd, fmtUsdSigned } from "../../lib/format";
+import { Money, MoneyCell } from "./Money";
+import type { Period } from "./PeriodControl";
 
 const KIND_FILTERS: { kind: FinanceKind | "all"; label: string }[] = [
   { kind: "all", label: "All" },
@@ -64,14 +65,12 @@ function monthLabel(month: string): string {
 export function LedgerView({
   projectId,
   categories,
-  mode,
-  onModeChange,
-  onPay,
+  period: _period,
+  onPay: _onPay,
 }: {
   projectId: string;
   categories: FinanceCategory[];
-  mode: "transactions" | "owed";
-  onModeChange: (m: "transactions" | "owed") => void;
+  period: Period;
   onPay: (personId: string) => void;
 }) {
   const qc = useQueryClient();
@@ -83,12 +82,6 @@ export function LedgerView({
   const { data, isLoading } = useQuery({
     queryKey: ["finance-transactions", projectId],
     queryFn: () => api.financeTransactions(projectId, {}),
-  });
-  const { data: splits } = useQuery({
-    queryKey: ["finance-splits", projectId],
-    queryFn: () => api.financeSplits(projectId),
-    enabled: mode === "owed",
-    staleTime: 60_000,
   });
 
   const settle = useMutation({
@@ -162,28 +155,7 @@ export function LedgerView({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* Transactions ↔ Owed mode toggle */}
-      <div className="flex items-center gap-0.5 border-b border-border-1 bg-surface-0 px-5 py-2">
-        <ModeTab
-          active={mode === "transactions"}
-          onClick={() => onModeChange("transactions")}
-        >
-          Transactions
-        </ModeTab>
-        <ModeTab active={mode === "owed"} onClick={() => onModeChange("owed")}>
-          Owed
-        </ModeTab>
-      </div>
-
-      {mode === "owed" ? (
-        <OwedView
-          transactions={data?.items ?? []}
-          splits={splits}
-          onPay={onPay}
-        />
-      ) : (
-        <TransactionsBody />
-      )}
+      <TransactionsBody />
     </div>
   );
 
@@ -233,6 +205,7 @@ export function LedgerView({
           />
         </div>
 
+        <LedgerColumnHeader />
         <div className="flex-1 ws-scroll overflow-y-auto">
           {groups.length === 0 ? (
             <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-text-disabled">
@@ -274,28 +247,6 @@ export function LedgerView({
       </>
     );
   }
-}
-
-function ModeTab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded px-2.5 py-1 text-xs transition-colors ${
-        active ? "bg-white/[0.06] text-text-1" : "text-text-3 hover:text-text-1"
-      }`}
-    >
-      {children}
-    </button>
-  );
 }
 
 function MonthGroup({
@@ -457,20 +408,79 @@ function Row({
           <span className="text-text-disabled">—</span>
         )}
       </span>
-      <span className="w-24 shrink-0 text-right font-mono text-fin-robux tabular-nums">
-        {tx.currency === "robux" && tx.amountGross != null
-          ? fmtRobux(tx.robuxOut ?? tx.costAmount ?? tx.amountGross)
-          : "—"}
-      </span>
-      <span
-        className={`w-24 shrink-0 text-right font-mono tabular-nums ${amountColor}`}
-      >
-        {isMuted
-          ? `${tx.kind === "investment" ? "+" : "−"}${fmtUsd(tx.amountUsd)}`
-          : `${sign}${fmtUsd(tx.amountUsd)}`}
+      <MoneyCell className="w-28 shrink-0">
+        {tx.currency === "robux" && tx.amountGross != null ? (
+          <Money
+            amount={
+              (tx.kind === "expense" || tx.kind === "distribution" ? -1 : 1) *
+              (tx.robuxOut ?? tx.costAmount ?? tx.amountGross)
+            }
+            currency="robux"
+            signed
+            tone={
+              tx.kind === "revenue" || tx.kind === "investment"
+                ? "positive"
+                : "negative"
+            }
+            showRail={false}
+          />
+        ) : (
+          <span className="text-text-disabled">—</span>
+        )}
+      </MoneyCell>
+      <MoneyCell className="w-24 shrink-0">
+        <Money
+          amount={
+            (isMuted
+              ? tx.kind === "investment"
+                ? 1
+                : -1
+              : sign === "+"
+                ? 1
+                : sign === "−"
+                  ? -1
+                  : 1) * tx.amountUsd
+          }
+          currency="usd"
+          signed
+          tone={
+            owed
+              ? "alert"
+              : tx.kind === "revenue" || tx.kind === "investment"
+                ? "positive"
+                : tx.kind === "expense" || tx.kind === "distribution"
+                  ? "negative"
+                  : "default"
+          }
+          showRail={false}
+          className={amountColor}
+        />
+      </MoneyCell>
+      {/* running-balance cell: dims the rail this row did not move */}
+      <span className="flex w-40 shrink-0 flex-col items-end leading-tight">
+        <span
+          className={`font-mono text-[11px] tabular-nums ${
+            tx.runningBalanceRobux != null
+              ? "text-fin-robux"
+              : "text-text-disabled"
+          }`}
+        >
+          {tx.runningBalanceRobux != null
+            ? fmtRobux(tx.runningBalanceRobux)
+            : "·"}
+        </span>
+        <span
+          className={`font-mono text-[10px] tabular-nums ${
+            tx.runningBalanceUsd != null
+              ? "text-fin-positive"
+              : "text-text-disabled"
+          }`}
+        >
+          {tx.runningBalanceUsd != null ? fmtUsd(tx.runningBalanceUsd) : "·"}
+        </span>
       </span>
       {/* action slot — reserved width so amounts stay aligned */}
-      <span className="flex w-24 shrink-0 justify-end">
+      <span className="flex w-20 shrink-0 justify-end">
         {owed ? (
           <button
             type="button"
@@ -481,6 +491,24 @@ function Row({
           </button>
         ) : null}
       </span>
+    </div>
+  );
+}
+
+// Sticky column header row, matches the Row column widths below.
+function LedgerColumnHeader() {
+  return (
+    <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border-1 bg-surface-1/60 px-5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled backdrop-blur">
+      <span className="w-14 shrink-0">Date</span>
+      <span className="w-4" />
+      <span className="w-24 shrink-0">Person</span>
+      <span className="flex-1">Description</span>
+      <span className="w-20 shrink-0">Rail</span>
+      <span className="w-32 shrink-0">Category</span>
+      <span className="w-28 shrink-0 text-right">Robux</span>
+      <span className="w-24 shrink-0 text-right">USD</span>
+      <span className="w-40 shrink-0 text-right">Running balance</span>
+      <span className="w-20 shrink-0" />
     </div>
   );
 }
@@ -496,168 +524,4 @@ function StatusGlyph({ tx }: { tx: FinanceTransaction }) {
   );
 }
 
-/* --------------------------------- Owed ---------------------------------- */
-
-// Strip a redundant leading/trailing "handle — " so the person, shown once as
-// the row lead, isn't repeated in the label text.
-function cleanDesc(desc: string, handle?: string): string {
-  if (!handle) return desc;
-  const h = handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return (
-    desc
-      .replace(new RegExp(`^${h}\\s*[—-]\\s*`, "i"), "")
-      .replace(new RegExp(`\\s*[—-]\\s*${h}$`, "i"), "")
-      .trim() || desc
-  );
-}
-
-interface OwedPerson {
-  personId: string;
-  handle: string;
-  avatarUrl: string | null;
-  totalUsd: number;
-  robux: number;
-  usd: number;
-  splitUsd: number;
-  jobLabels: string[];
-}
-
-// The actionable "who you owe" list: unpaid expenses + unsettled split debt,
-// grouped by person, avatar-led, sorted by amount. Pay opens the payout
-// composer prefilled (§7.4). This is where owed lives — not the overview.
-function OwedView({
-  transactions,
-  splits,
-  onPay,
-}: {
-  transactions: FinanceTransaction[];
-  splits: RevenueSplit[] | undefined;
-  onPay: (personId: string) => void;
-}) {
-  const byPerson = new Map<string, OwedPerson>();
-  const get = (p: {
-    id: string;
-    discordHandle: string;
-    avatarUrl: string | null;
-  }): OwedPerson => {
-    const existing = byPerson.get(p.id);
-    if (existing) return existing;
-    const created: OwedPerson = {
-      personId: p.id,
-      handle: p.discordHandle,
-      avatarUrl: p.avatarUrl,
-      totalUsd: 0,
-      robux: 0,
-      usd: 0,
-      splitUsd: 0,
-      jobLabels: [],
-    };
-    byPerson.set(p.id, created);
-    return created;
-  };
-
-  // Unpaid expenses.
-  for (const t of transactions) {
-    if (t.kind !== "expense" || t.status !== "owed" || !t.person) continue;
-    const g = get(t.person);
-    g.totalUsd += t.amountUsd;
-    if (t.currency === "robux") g.robux += t.costAmount ?? t.amountGross ?? 0;
-    else g.usd += t.amountUsd;
-    g.jobLabels.push(cleanDesc(t.description, t.person.discordHandle));
-  }
-  // Unsettled split accruals.
-  for (const s of splits ?? []) {
-    if (s.owed.length === 0) continue;
-    const g = get(s.person);
-    for (const o of s.owed) {
-      g.totalUsd += o.usd;
-      g.splitUsd += o.usd;
-      if (o.currency === "robux") g.robux += o.native;
-      else g.usd += o.native;
-    }
-  }
-
-  const people = [...byPerson.values()].sort((a, b) => b.totalUsd - a.totalUsd);
-  const total = people.reduce((s, p) => s + p.totalUsd, 0);
-
-  if (people.length === 0) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-10 text-sm text-text-disabled">
-        Nothing owed — you're all settled.
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 ws-scroll overflow-y-auto">
-      <div className="flex items-center gap-2 border-b border-border-1 px-5 py-2.5">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled">
-          Outstanding
-        </span>
-        <span className="font-mono text-xs tabular-nums text-fin-alert">
-          {fmtUsd(total)}
-        </span>
-        <span className="text-xs text-text-disabled">
-          to {people.length} {people.length === 1 ? "person" : "people"}
-        </span>
-      </div>
-      {people.map((p) => {
-        const parts: string[] = [];
-        if (p.splitUsd > 0) parts.push("revenue share");
-        if (p.jobLabels.length > 0) {
-          parts.push(
-            p.jobLabels.slice(0, 2).join(", ") +
-              (p.jobLabels.length > 2 ? ` +${p.jobLabels.length - 2}` : ""),
-          );
-        }
-        return (
-          <div
-            key={p.personId}
-            className="flex items-center gap-3 border-b border-border-1 px-5 py-3 hover:bg-white/[0.02]"
-          >
-            <OwedAvatar url={p.avatarUrl} handle={p.handle} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-text-1">{p.handle}</div>
-              <div className="truncate text-[11px] text-text-disabled">
-                {parts.join(" · ")}
-              </div>
-            </div>
-            <div className="shrink-0 text-right font-mono text-sm tabular-nums">
-              <div className="text-text-1">{fmtUsd(p.totalUsd)}</div>
-              {p.robux > 0 ? (
-                <div className="text-[11px] text-fin-robux">
-                  {fmtRobux(p.robux)}
-                </div>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={() => onPay(p.personId)}
-              className="shrink-0 rounded border border-border-2 px-3 py-1.5 text-xs text-text-2 transition-colors hover:border-fin-positive/50 hover:text-fin-positive"
-            >
-              Pay
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function OwedAvatar({ url, handle }: { url: string | null; handle: string }) {
-  if (url) {
-    return (
-      <img
-        src={url}
-        alt=""
-        className="h-9 w-9 shrink-0 rounded-full bg-surface-1 object-cover"
-      />
-    );
-  }
-  const initials = handle.slice(0, 2).toUpperCase();
-  return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface-1 text-[11px] font-semibold text-text-3">
-      {initials}
-    </span>
-  );
-}
+// Owed nested view retired — owed lives in People now, one per person.

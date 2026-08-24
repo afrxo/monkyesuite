@@ -10,6 +10,15 @@ import { type FormEvent, useState } from "react";
 import { toastError } from "../../components/Toast";
 import { api } from "../../lib/api";
 import { fmtRobux, fmtUsd } from "../../lib/format";
+import { Money } from "./Money";
+
+const RAIL_LABEL: Record<string, string> = {
+  robux_gamepass: "Gamepass",
+  robux_group_payout: "Group",
+  paypal: "PayPal",
+  wise: "Wise",
+  bank: "Bank",
+};
 
 const RATING_COLOR: Record<FinancePersonRating, string> = {
   good: "text-fin-positive",
@@ -33,7 +42,13 @@ export function PeopleView({ projectId }: { projectId: string }) {
     );
   }
 
-  const people = data ?? [];
+  // Owed descending — the spec's default sort (a stakeholder / accountant
+  // opens People to see who's due, not who was hired first).
+  const people = [...(data ?? [])].sort((a, b) => {
+    const oa = a.owed.reduce((s, o) => s + o.usd, 0);
+    const ob = b.owed.reduce((s, o) => s + o.usd, 0);
+    return ob - oa;
+  });
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -51,6 +66,7 @@ export function PeopleView({ projectId }: { projectId: string }) {
             + Add
           </button>
         </div>
+        <PeopleColumnHeader />
         {adding ? (
           <AddPersonRow projectId={projectId} onDone={() => setAdding(false)} />
         ) : null}
@@ -81,6 +97,23 @@ export function PeopleView({ projectId }: { projectId: string }) {
   );
 }
 
+function PeopleColumnHeader() {
+  return (
+    <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border-1 bg-surface-1/60 px-5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-disabled backdrop-blur">
+      <span className="w-2 shrink-0" />
+      <span className="w-28 shrink-0">Person</span>
+      <span className="w-10 shrink-0">Split</span>
+      <span className="w-4 shrink-0" />
+      <span className="flex-1">Roles</span>
+      <span className="w-32 shrink-0">Rails</span>
+      <span className="w-28 shrink-0 text-right">Earned</span>
+      <span className="w-28 shrink-0 text-right">Paid</span>
+      <span className="w-32 shrink-0 text-right text-text-1">Owed</span>
+      <span className="w-16 shrink-0 text-right">Last paid</span>
+    </div>
+  );
+}
+
 function PersonRow({
   person,
   active,
@@ -90,6 +123,9 @@ function PersonRow({
   active: boolean;
   onClick: () => void;
 }) {
+  const owedRobux = person.owed.find((o) => o.currency === "robux");
+  const owedUsd = person.owed.find((o) => o.currency === "usd");
+  const owedTotalUsd = person.owed.reduce((s, o) => s + o.usd, 0);
   return (
     <button
       type="button"
@@ -116,23 +152,85 @@ function PersonRow({
         <span className="w-10 shrink-0" />
       )}
       {person.hasCapital ? (
-        <span className="w-4 shrink-0 text-fin-robux">◈</span>
+        <span
+          className="w-4 shrink-0 text-fin-robux"
+          title="capital contributor"
+        >
+          ◈
+        </span>
       ) : (
         <span className="w-4 shrink-0" />
       )}
       <span className="flex-1 truncate text-text-disabled">
         {person.roles.join(", ") || "—"}
       </span>
-      <span className="w-20 shrink-0 truncate text-text-disabled">
-        {person.preferredMethod ?? "—"}
+      {/* Rails: every method this person was actually paid on, per backend */}
+      <span className="flex w-32 shrink-0 flex-wrap gap-1 text-[10px]">
+        {person.rails.length === 0 ? (
+          <span className="text-text-disabled">—</span>
+        ) : (
+          person.rails.map((r) => (
+            <span
+              key={r}
+              className="rounded border border-border-2 px-1 text-text-3"
+            >
+              {RAIL_LABEL[r] ?? r}
+            </span>
+          ))
+        )}
       </span>
-      <span className="w-10 shrink-0 text-right font-mono tabular-nums text-text-disabled">
-        {person.txCount}
+      {/* Earned / paid: two-column stack per rail so multi-rail history stays visible */}
+      <span className="flex w-28 shrink-0 flex-col items-end gap-0.5">
+        {person.earnedRobux > 0 ? (
+          <span className="font-mono text-[11px] tabular-nums text-fin-robux">
+            {fmtRobux(person.earnedRobux)}
+          </span>
+        ) : null}
+        {person.earnedUsd > 0 ? (
+          <span className="font-mono text-[11px] tabular-nums text-fin-positive">
+            {fmtUsd(person.earnedUsd)}
+          </span>
+        ) : null}
+        {person.earnedRobux === 0 && person.earnedUsd === 0 ? (
+          <span className="text-text-disabled">—</span>
+        ) : null}
       </span>
-      <span className="w-24 shrink-0 text-right font-mono tabular-nums text-text-1">
-        {person.paidRobux > 0
-          ? fmtRobux(person.paidRobux)
-          : fmtUsd(person.paidUsd)}
+      <span className="flex w-28 shrink-0 flex-col items-end gap-0.5">
+        {person.paidRobux > 0 ? (
+          <span className="font-mono text-[11px] tabular-nums text-fin-robux">
+            {fmtRobux(person.paidRobux)}
+          </span>
+        ) : null}
+        {person.paidUsd > 0 ? (
+          <span className="font-mono text-[11px] tabular-nums text-fin-positive">
+            {fmtUsd(person.paidUsd)}
+          </span>
+        ) : null}
+        {person.paidRobux === 0 && person.paidUsd === 0 ? (
+          <span className="text-text-disabled">—</span>
+        ) : null}
+      </span>
+      {/* Owed — the emphasized figure, per currency, tone shifts if positive */}
+      <span className="flex w-32 shrink-0 flex-col items-end gap-0.5">
+        {owedRobux && owedRobux.native > 0 ? (
+          <Money
+            amount={owedRobux.native}
+            currency="robux"
+            tone="alert"
+            showRail={false}
+          />
+        ) : null}
+        {owedUsd && owedUsd.native > 0 ? (
+          <Money
+            amount={owedUsd.native}
+            currency="usd"
+            tone="alert"
+            showRail={false}
+          />
+        ) : null}
+        {owedTotalUsd <= 0 ? (
+          <span className="text-text-disabled">settled</span>
+        ) : null}
       </span>
       <span className="w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-text-disabled">
         {person.lastPaidOn ?? "—"}

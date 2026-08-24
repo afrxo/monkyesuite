@@ -237,6 +237,17 @@ export interface CohortSummary {
   computedAt: string;
 }
 
+// AudienceRhythm — a 7×24 grid (day-of-week × UTC hour) of average CCU over
+// the recent tracking window. Cells are row-major: cells[dow*24 + hour].
+// `peak` and `trough` are the highest / lowest cells respectively (helpful for
+// labeling the "peak Sunday 8pm UTC" moment without re-scanning client-side).
+export interface AudienceRhythm {
+  cells: number[]; // length 168
+  peak: { dow: number; hour: number; ccu: number };
+  trough: { dow: number; hour: number; ccu: number };
+  windowDays: number; // how many days of raw metrics the aggregate covered
+}
+
 export interface Tag {
   id: string;
   axis: TagAxis;

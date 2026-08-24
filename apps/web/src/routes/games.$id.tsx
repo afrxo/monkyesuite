@@ -1,4 +1,5 @@
 import type {
+  AudienceRhythm,
   CohortSummary,
   CreatorPortfolio,
   GameEvent,
@@ -113,6 +114,7 @@ export const Route = createFileRoute("/games/$id")({
         creator,
         movers,
         cohort,
+        rhythm,
       ] = await Promise.all([
         api.game(id),
         api.metrics(id, "hour", metricsLimit),
@@ -127,6 +129,7 @@ export const Route = createFileRoute("/games/$id")({
         api.creator(id),
         api.movers(id),
         api.cohort(id),
+        api.rhythm(id),
       ]);
       return {
         game,
@@ -142,6 +145,7 @@ export const Route = createFileRoute("/games/$id")({
         creator,
         movers,
         cohort,
+        rhythm,
         ccuRange: deps.ccuRange as CcuRange,
       };
     } catch (err) {
@@ -178,6 +182,7 @@ function GameDetailPage() {
     creator,
     movers,
     cohort,
+    rhythm,
     ccuRange,
   } = Route.useLoaderData();
   const navigate = useNavigate({ from: "/games/$id" });
@@ -489,6 +494,8 @@ function GameDetailPage() {
       {cohort ? (
         <CohortRow cohort={cohort} genre={game.robloxGenre} />
       ) : null}
+
+      {rhythm ? <AudienceRhythmSection rhythm={rhythm} /> : null}
 
       {creator && creator.games.length > 0 ? (
         <CreatorContext data={creator} />
@@ -1122,6 +1129,69 @@ function WhatElseMoving({ games }: { games: MoverCard[] }) {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function AudienceRhythmSection({ rhythm }: { rhythm: AudienceRhythm }) {
+  const cells = rhythm.cells;
+  let max = 0;
+  for (const v of cells) if (v > max) max = v;
+  if (max <= 0) return null;
+  const peakLabel = `${DOW_LABELS[rhythm.peak.dow] ?? "?"} ${String(
+    rhythm.peak.hour,
+  ).padStart(2, "0")}:00 UTC`;
+  return (
+    <section className="border-b border-border-1 px-6 py-6 lg:px-10">
+      <div className="mb-3 flex items-baseline gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-4">
+          Audience rhythm
+        </span>
+        <span className="text-xs text-text-5">
+          {rhythm.windowDays}d avg · peak {peakLabel} · {fmtCCUCompact(rhythm.peak.ccu)}
+        </span>
+      </div>
+      <div className="flex flex-col gap-1">
+        <div className="flex text-[9px] uppercase tracking-wide text-text-5">
+          <div className="w-10" />
+          {Array.from({ length: 24 }).map((_, h) => (
+            <div key={h} className="flex-1 text-center">
+              {h % 3 === 0 ? String(h).padStart(2, "0") : ""}
+            </div>
+          ))}
+        </div>
+        {DOW_LABELS.map((day, dow) => (
+          <div key={day} className="flex items-center gap-1">
+            <div className="w-10 text-[10px] uppercase tracking-wide text-text-4">
+              {day}
+            </div>
+            {Array.from({ length: 24 }).map((_, hour) => {
+              const v = cells[dow * 24 + hour] ?? 0;
+              const intensity = v > 0 ? v / max : 0;
+              return (
+                <div
+                  key={hour}
+                  className="flex-1"
+                  title={`${day} ${String(hour).padStart(2, "0")}:00 · ${fmtCCUCompact(v)} avg`}
+                  style={{
+                    height: 20,
+                    borderRadius: 3,
+                    background:
+                      intensity > 0
+                        ? `color-mix(in oklab, var(--lifecycle-growing) ${Math.round(
+                            intensity * 100,
+                          )}%, var(--surface-1))`
+                        : "var(--surface-1)",
+                    opacity: intensity > 0 ? 0.5 + intensity * 0.5 : 0.4,
+                  }}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

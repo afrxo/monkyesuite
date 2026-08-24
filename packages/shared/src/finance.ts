@@ -102,6 +102,12 @@ export interface FinancePersonListRow extends FinancePerson {
   txCount: number; // paid expense rows
   paidRobux: number;
   paidUsd: number;
+  earnedRobux: number; // lifetime accruals + paid expenses on the Robux rail
+  earnedUsd: number;
+  // owed = earned − paid, per currency. Emphasised in the redesign so a person
+  // paid on multiple rails does not collapse into one blended number.
+  owed: CurrencyAmount[];
+  rails: FinanceMethod[]; // every method this person has actually been paid on
   lastPaidOn: string | null;
 }
 
@@ -150,6 +156,12 @@ export interface FinanceTransaction {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  // Cash balance in each currency AFTER this row posts. Computed server-side
+  // against ALL project rows (so the running total ignores the current filter
+  // set — a filtered ledger still reads the real cash position at each point).
+  // Null when the row does not move that rail.
+  runningBalanceRobux: number | null;
+  runningBalanceUsd: number | null;
 }
 
 export interface FinancePersonDetail extends FinancePerson {
@@ -255,6 +267,127 @@ export interface FinancePosition {
 export interface FinanceTransactionPage {
   items: FinanceTransaction[];
   nextCursor: string | null;
+}
+
+/* ---- /statements: batched replacement for /overview, period-scoped ---- */
+
+// Every figure declares its BASIS explicitly. The audience includes an
+// investor and eventually an accountant, so "profit" without a basis label
+// is a bug: revenue − paid_expenses is cash, revenue − paid − unpaid − splits
+// is accrual, and a period that distributed more than it earned cannot read
+// as a good period.
+export type FinanceBasis = "accrual" | "cash";
+
+export interface FinanceStatementLine {
+  label: string;
+  robux: number | null;
+  usd: number | null;
+  // Ratio to revenue for the same period. Rendered as the "% of revenue"
+  // column in the income statement. Null on lines where a ratio is meaningless
+  // (opening/closing on the cash flow, category subrows for own-share display).
+  pctOfRevenue: number | null;
+  basis: FinanceBasis;
+  // If set, the row expands into these children in the UI. Categories under
+  // Direct costs, split people under Revenue splits accrued, etc.
+  children?: FinanceStatementLine[];
+}
+
+export interface FinanceCashFlowColumn {
+  currency: FinanceCurrency;
+  opening: number;
+  revenueIn: number;
+  expensesOut: number;
+  distributionsOut: number;
+  capitalIn: number;
+  // DevEx transfer: negative on the Robux column, positive on USD. The UI
+  // renders this as an arrow between the two columns, not as two ledger
+  // entries.
+  cashoutTransfer: number;
+  closing: number;
+}
+
+export interface FinanceReconciliationCandidate {
+  txId: string;
+  ref: string;
+  occurredOn: string;
+  description: string;
+  amountUsd: number;
+  personId: string | null;
+  personHandle: string | null;
+  kind: FinanceKind;
+  // Distance from the reconciliation delta. Smaller = better candidate.
+  distanceUsd: number;
+  reason: string; // "same amount ± $2", "same-day duplicate", etc.
+}
+
+export interface FinanceStatements {
+  from: string; // YYYY-MM-DD inclusive
+  to: string; // YYYY-MM-DD inclusive
+  rate: number;
+  // Prior period, same length, same-day-aligned. Powers the delta lines
+  // beside each headline figure.
+  priorFrom: string;
+  priorTo: string;
+  summary: {
+    revenue: { robux: number; usd: number; basis: FinanceBasis };
+    costsPaid: { robux: number; usd: number; basis: FinanceBasis };
+    costsUnpaid: { robux: number; usd: number; basis: FinanceBasis };
+    ownerEarnings: { usd: number; basis: FinanceBasis }; // accrual
+    cashMovement: { robux: number; usd: number; basis: FinanceBasis }; // cash
+    // Deltas vs the same-length prior period, as fractions (0.12 = +12%).
+    revenueDeltaPct: number | null;
+    costsDeltaPct: number | null;
+    ownerEarningsDeltaPct: number | null;
+    cashMovementDeltaPct: number | null;
+    budgetUsd: number | null;
+    // Includes unpaid costs (unlike the deprecated /overview budgetPct which
+    // undercounted by ignoring accrued-but-unpaid work).
+    budgetPct: number | null;
+  };
+  incomeStatement: {
+    revenue: FinanceStatementLine;
+    directCosts: FinanceStatementLine; // with children per category
+    unpaidCosts: FinanceStatementLine;
+    grossProfit: FinanceStatementLine;
+    revenueSplitsAccrued: FinanceStatementLine; // with children per person
+    ownerEarnings: FinanceStatementLine;
+  };
+  cashFlow: {
+    robux: FinanceCashFlowColumn;
+    usd: FinanceCashFlowColumn;
+  };
+  balanceSheet: FinancePosition["balanceSheet"] & {
+    // The delta the reconciliation row shows. 0 = ties out.
+    deltaUsd: number;
+    candidates: FinanceReconciliationCandidate[];
+  };
+  costAttribution: {
+    byCategory: Array<{
+      id: string;
+      name: string;
+      color: string;
+      spendUsd: number;
+      txCount: number;
+      pct: number;
+    }>;
+    byPerson: Array<{
+      personId: string | null;
+      handle: string | null;
+      spendUsd: number;
+      txCount: number;
+      pct: number;
+    }>;
+  };
+  recoup: {
+    capitalInUsd: number;
+    returnedUsd: number;
+    surplusUsd: number; // 0 when not fully recouped
+    fullyRecouped: boolean;
+  };
+}
+
+export interface FinanceSettleResult {
+  createdTxIds: string[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -468,6 +601,67 @@ export const financePositionQuerySchema = z.object({
   period: z.union([financeMonthSchema, z.literal("all")]).default("all"),
 });
 export type FinancePositionQuery = z.infer<typeof financePositionQuerySchema>;
+
+/* ---- statements + settle schemas (declared here so dateOnly/financeUuid
+   are already in scope) ---- */
+
+export const financeStatementsQuerySchema = z
+  .object({
+    from: dateOnly.optional(),
+    to: dateOnly.optional(),
+  })
+  .refine(
+    (v) => (v.from == null) === (v.to == null),
+    "from and to must be provided together",
+  )
+  .refine(
+    (v) => v.from == null || v.to == null || v.from <= v.to,
+    "from must be on or before to",
+  );
+export type FinanceStatementsQuery = z.infer<
+  typeof financeStatementsQuerySchema
+>;
+
+// One line = "pay this person this native amount on this rail in this
+// currency". The endpoint groups lines into a single tx: inserts each as
+// a distribution, decrementing accruals via the same rewrite path as a
+// normal distribution row. Robux and USD settle separately per §4.8.1.
+export const financeSettleLineSchema = z
+  .object({
+    personId: financeUuid,
+    currency: z.enum(FINANCE_CURRENCIES),
+    amountNative: z.number().positive(),
+    method: z.enum(DISTRIBUTION_METHODS),
+    occurredOn: dateOnly.optional(),
+    note: z.string().max(500).nullable().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.currency === "robux" && v.method !== "robux_group_payout") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["method"],
+        message: "Robux settles by group payout only.",
+      });
+    }
+    if (v.currency === "usd" && v.method === "robux_group_payout") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["method"],
+        message: "USD settles by Wise / PayPal / bank.",
+      });
+    }
+    if (v.currency === "robux" && !Number.isInteger(v.amountNative)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amountNative"],
+        message: "Robux are integers.",
+      });
+    }
+  });
+export const financeSettleSchema = z.object({
+  lines: z.array(financeSettleLineSchema).min(1).max(100),
+});
+export type FinanceSettleInput = z.infer<typeof financeSettleSchema>;
 
 // Default per-project category seed (§5) — by contractor discipline.
 export const FINANCE_DEFAULT_CATEGORIES: ReadonlyArray<{

@@ -7,6 +7,7 @@
 // rather than a silent empty result (07-api.md §7.5).
 
 import type {
+  AudienceRhythm,
   CohortSummary,
   CreatorPortfolio,
   DemandOverlay,
@@ -47,6 +48,7 @@ import { toAuthEmail, toDisplayUsername } from "./identity.js";
 import { TTL, TtlCache } from "./cache.js";
 import {
   gameExists,
+  getAudienceRhythm,
   getCohort,
   getCreatorPortfolio,
   getDemand,
@@ -113,6 +115,7 @@ const tagsCache = new TtlCache<Tag[]>(TTL.tags);
 const creatorCache = new TtlCache<CreatorPortfolio | null>(TTL.timeseries);
 const moversCache = new TtlCache<MoverCard[]>(TTL.timeseries);
 const cohortCache = new TtlCache<CohortSummary | null>(TTL.timeseries);
+const rhythmCache = new TtlCache<AudienceRhythm | null>(TTL.timeseries);
 // Pulse: 30s in-process memo mirrors the s-maxage sent to CDN, so a Railway
 // instance still absorbs bursty request-path hits between edge revalidations.
 const pulseCache = new TtlCache<PulsePayload>(30_000);
@@ -364,6 +367,15 @@ export function createApp() {
     const id = parseUniverseId(c.req.param("universeId"));
     await assertGame(id);
     return c.json(await cohortCache.get(String(id), () => getCohort(id)));
+  });
+
+  // Audience rhythm — 7×24 UTC average-CCU grid over the last 28 days.
+  v1.get("/games/:universeId/rhythm", async (c) => {
+    const id = parseUniverseId(c.req.param("universeId"));
+    await assertGame(id);
+    return c.json(
+      await rhythmCache.get(String(id), () => getAudienceRhythm(id)),
+    );
   });
 
   /* ------------------------------ tags ---------------------------------- */

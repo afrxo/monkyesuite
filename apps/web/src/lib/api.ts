@@ -8,6 +8,7 @@ import type {
   Block,
   BlockInput,
   Board,
+  AudienceRhythm,
   CohortSummary,
   CreateChecklistItemInput,
   CreateCommentInput,
@@ -207,6 +208,8 @@ export const api = {
     get<CreatorPortfolio | null>(`/games/${id}/creator`),
   movers: (id: number) => get<MoverCard[]>(`/games/${id}/movers`),
   cohort: (id: number) => get<CohortSummary | null>(`/games/${id}/cohort`),
+  rhythm: (id: number) =>
+    get<AudienceRhythm | null>(`/games/${id}/rhythm`),
 
   // Game-note authoring (auth required; author-gated at the API).
   createNote: (id: number, input: CreateGameNoteInput) =>

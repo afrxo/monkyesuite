@@ -40,8 +40,10 @@ import {
   createFinanceTxSchema,
   FINANCE_DEFAULT_CATEGORIES,
   type FinanceBudget,
+  type FinanceCashFlowColumn,
   type FinanceCategory,
   type FinanceCurrency,
+  type FinanceKind,
   type FinanceOverview,
   type FinanceOwedRow,
   type FinancePerson,
@@ -49,11 +51,17 @@ import {
   type FinancePersonListRow,
   type FinancePersonRef,
   type FinancePosition,
+  type FinanceReconciliationCandidate,
   type FinanceSettings,
+  type FinanceSettleResult,
+  type FinanceStatementLine,
+  type FinanceStatements,
   type FinanceTransaction,
   type FinanceTransactionPage,
   financeMonthSchema,
   financePositionQuerySchema,
+  financeSettleSchema,
+  financeStatementsQuerySchema,
   financeTxQuerySchema,
   patchFinancePersonSchema,
   patchFinanceSplitSchema,
@@ -208,10 +216,16 @@ const mapPerson = (r: PersonRow): FinancePerson => ({
   createdAt: isoReq(r.createdAt),
 });
 
+interface RunningBalance {
+  robux: number | null;
+  usd: number | null;
+}
+
 function mapTx(
   r: TxRow,
   categoriesById: Map<string, CategoryRow>,
   peopleById: Map<string, PersonRow>,
+  running?: RunningBalance,
 ): FinanceTransaction {
   const cat = r.categoryId ? categoriesById.get(r.categoryId) : undefined;
   const person = r.personId ? peopleById.get(r.personId) : undefined;
@@ -243,7 +257,68 @@ function mapTx(
     note: r.note,
     createdAt: isoReq(r.createdAt),
     updatedAt: isoReq(r.updatedAt),
+    runningBalanceRobux: running?.robux ?? null,
+    runningBalanceUsd: running?.usd ?? null,
   };
+}
+
+// Cash balance after each tx posts. Computed in one pass across ALL project
+// rows via a window function, then attached to the filtered page. Includes
+// opening balances. A row that does not move a given rail carries null for
+// that rail — the UI dims those cells so the running total column reads as a
+// per-rail ledger, not a synthetic same-value repeat.
+async function runningBalancesByTxId(
+  tx: Tx,
+  projectId: string,
+  openingRobux: number,
+  openingUsd: number,
+): Promise<Map<string, RunningBalance>> {
+  const r = await tx.execute<{
+    id: string;
+    robux_delta: string;
+    usd_delta: string;
+    running_robux: string;
+    running_usd: string;
+  }>(sql`
+    select id,
+      robux_delta::text,
+      usd_delta::text,
+      (${openingRobux}::numeric + sum(robux_delta) over (
+        order by occurred_on asc, id asc
+        rows between unbounded preceding and current row
+      ))::text as running_robux,
+      (${openingUsd}::numeric + sum(usd_delta) over (
+        order by occurred_on asc, id asc
+        rows between unbounded preceding and current row
+      ))::text as running_usd
+    from (
+      select id, occurred_on,
+        (case
+          when currency = 'robux' and kind in ('revenue','investment') then amount_net
+          when currency = 'robux' and ((kind = 'expense' and status = 'paid') or kind = 'distribution') then -cost_amount
+          when kind = 'cashout' then -robux_out
+          else 0
+        end)::numeric as robux_delta,
+        (case
+          when currency = 'usd' and kind in ('revenue','investment') then amount_net
+          when currency = 'usd' and ((kind = 'expense' and status = 'paid') or kind = 'distribution') then -cost_amount
+          when kind = 'cashout' then usd_in
+          else 0
+        end)::numeric as usd_delta
+      from finance_transactions
+      where project_id = ${projectId}
+    ) rows
+  `);
+  const out = new Map<string, RunningBalance>();
+  for (const row of r.rows) {
+    const robuxDelta = Number(row.robux_delta);
+    const usdDelta = Number(row.usd_delta);
+    out.set(row.id, {
+      robux: robuxDelta !== 0 ? Number(row.running_robux) : null,
+      usd: usdDelta !== 0 ? round2(Number(row.running_usd)) : null,
+    });
+  }
+  return out;
 }
 
 async function loadTxRefs(
@@ -492,6 +567,10 @@ async function splitOwedByPerson(
   asOf?: string,
 ): Promise<PersonOwed[]> {
   const dateCond = asOf ? sql` and occurred_on <= ${asOf}` : sql``;
+  // FULL OUTER JOIN: a distribution on a (person, currency) with no matching
+  // accrual is still real — the person is prepaid / overpaid. LEFT JOIN silently
+  // dropped those rows, which then never decremented the balance-sheet liability
+  // (via settledUsd) and broke A = L + E by the distribution's USD value.
   const r = await tx.execute<{
     person_id: string;
     currency: FinanceCurrency;
@@ -508,15 +587,20 @@ async function splitOwedByPerson(
       group by person_id, currency
     ),
     dist as (
-      select person_id, currency, sum(amount_net) as distributed
+      select person_id, currency,
+             sum(amount_net) as distributed,
+             max(rate_used) as rate_last
       from finance_transactions
-      where project_id = ${projectId} and kind = 'distribution'${dateCond}
+      where project_id = ${projectId} and kind = 'distribution'
+        and person_id is not null and currency is not null${dateCond}
       group by person_id, currency
     )
-    select acc.person_id, acc.currency,
-           acc.accrued::text, coalesce(dist.distributed, 0)::text as distributed,
-           acc.rate_last::text
-    from acc left join dist using (person_id, currency)
+    select coalesce(acc.person_id, dist.person_id) as person_id,
+           coalesce(acc.currency, dist.currency) as currency,
+           coalesce(acc.accrued, 0)::text as accrued,
+           coalesce(dist.distributed, 0)::text as distributed,
+           coalesce(acc.rate_last, dist.rate_last)::text as rate_last
+    from acc full outer join dist using (person_id, currency)
   `);
   return r.rows.map((row) => {
     const accrued = Number(row.accrued);
@@ -856,10 +940,22 @@ export function financeRoutes(): Hono<AppEnv> {
           .limit(PAGE_SIZE + 1);
         const page = rows.slice(0, PAGE_SIZE);
         const refs = await loadTxRefs(tx, projectId);
+        const settings = await ensureSettings(tx, projectId);
+        const running = await runningBalancesByTxId(
+          tx,
+          projectId,
+          settings.openingRobux ?? 0,
+          settings.openingUsd ?? 0,
+        );
         const last = page[page.length - 1];
         return {
           items: page.map((row) =>
-            mapTx(row, refs.categoriesById, refs.peopleById),
+            mapTx(
+              row,
+              refs.categoriesById,
+              refs.peopleById,
+              running.get(row.id),
+            ),
           ),
           nextCursor:
             rows.length > PAGE_SIZE && last
@@ -1092,6 +1188,8 @@ export function financeRoutes(): Hono<AppEnv> {
           tx_count: string;
           paid_robux: string;
           paid_usd: string;
+          unpaid_expense_robux: string;
+          unpaid_expense_usd: string;
           last_paid: string | null;
           has_capital: boolean;
         }>(sql`
@@ -1099,6 +1197,8 @@ export function financeRoutes(): Hono<AppEnv> {
           count(t.id) filter (where t.kind in ('expense','distribution') and t.status = 'paid')::text as tx_count,
           coalesce(sum(t.cost_amount) filter (where t.currency = 'robux' and t.status = 'paid' and t.kind in ('expense','distribution')), 0)::text as paid_robux,
           coalesce(sum(t.cost_amount) filter (where t.currency = 'usd' and t.status = 'paid' and t.kind in ('expense','distribution')), 0)::text as paid_usd,
+          coalesce(sum(t.cost_amount) filter (where t.currency = 'robux' and t.kind = 'expense' and t.status = 'owed'), 0)::text as unpaid_expense_robux,
+          coalesce(sum(t.cost_amount) filter (where t.currency = 'usd' and t.kind = 'expense' and t.status = 'owed'), 0)::text as unpaid_expense_usd,
           max(coalesce(t.paid_on, t.occurred_on)) filter (where t.kind in ('expense','distribution') and t.status = 'paid')::text as last_paid,
           bool_or(t.kind = 'investment') as has_capital
         from people p
@@ -1107,6 +1207,24 @@ export function financeRoutes(): Hono<AppEnv> {
         group by p.id
       `);
         const aggById = new Map(agg.rows.map((a) => [a.person_id, a]));
+        // Rails a person has actually been paid on — sourced from paid
+        // expenses AND distributions to them. Preserves the multi-rail truth
+        // the old collapsed "preferred method" field hid.
+        const railAgg = await tx.execute<{
+          person_id: string;
+          method: string;
+        }>(sql`
+        select distinct t.person_id, t.method from finance_transactions t
+        where t.project_id = ${projectId} and t.person_id is not null
+          and t.method is not null
+          and ((t.kind = 'expense' and t.status = 'paid') or t.kind = 'distribution')
+      `);
+        const railsById = new Map<string, string[]>();
+        for (const row of railAgg.rows) {
+          const list = railsById.get(row.person_id) ?? [];
+          if (!list.includes(row.method)) list.push(row.method);
+          railsById.set(row.person_id, list);
+        }
         const activeSplits = await tx.execute<{
           person_id: string;
           percent: string;
@@ -1119,15 +1237,52 @@ export function financeRoutes(): Hono<AppEnv> {
         const pctById = new Map(
           activeSplits.rows.map((s) => [s.person_id, Number(s.percent)]),
         );
+        // Split-side owed (accrued − distributed) per (person, currency), via
+        // the FULL OUTER JOIN that also captures distributions on rails with no
+        // matching accrual — the row the old LEFT JOIN dropped.
+        const owedByPerson = await splitOwedByPerson(tx, projectId);
+        const splitOwedById = new Map<string, Map<FinanceCurrency, number>>();
+        for (const o of owedByPerson) {
+          const m =
+            splitOwedById.get(o.personId) ?? new Map<FinanceCurrency, number>();
+          m.set(o.currency, o.owed);
+          splitOwedById.set(o.personId, m);
+        }
+        const settings = await ensureSettings(tx, projectId);
         return rows.map((p) => {
           const a = aggById.get(p.id);
+          const paidRobux = Number(a?.paid_robux ?? 0);
+          const paidUsd = round2(Number(a?.paid_usd ?? 0));
+          const unpaidExpRobux = Number(a?.unpaid_expense_robux ?? 0);
+          const unpaidExpUsd = round2(Number(a?.unpaid_expense_usd ?? 0));
+          const splitOwed = splitOwedById.get(p.id);
+          const owedRobux = round2(
+            unpaidExpRobux + (splitOwed?.get("robux") ?? 0),
+          );
+          const owedUsd = round2(unpaidExpUsd + (splitOwed?.get("usd") ?? 0));
+          const owed: CurrencyAmount[] = [];
+          if (owedRobux !== 0) {
+            owed.push({
+              currency: "robux",
+              native: owedRobux,
+              usd: round2(usdFromRobux(owedRobux, settings.devexRate)),
+            });
+          }
+          if (owedUsd !== 0) {
+            owed.push({ currency: "usd", native: owedUsd, usd: owedUsd });
+          }
+          const rails = railsById.get(p.id) ?? [];
           return {
             ...mapPerson(p),
             activePercent: pctById.get(p.id) ?? null,
             hasCapital: a?.has_capital ?? false,
             txCount: Number(a?.tx_count ?? 0),
-            paidRobux: Number(a?.paid_robux ?? 0),
-            paidUsd: round2(Number(a?.paid_usd ?? 0)),
+            paidRobux,
+            paidUsd,
+            earnedRobux: round2(paidRobux + owedRobux),
+            earnedUsd: round2(paidUsd + owedUsd),
+            owed,
+            rails: rails as FinancePersonListRow["rails"],
             lastPaidOn: a?.last_paid ?? null,
           };
         });
@@ -1918,6 +2073,731 @@ export function financeRoutes(): Hono<AppEnv> {
       };
     });
     return c.json(out);
+  });
+
+  /* ---- statements: period-scoped batched read for the Statements tab ---- */
+  //
+  // Replaces the /overview + /position combo for the redesign. Every figure
+  // is period-scoped [from, to], with a same-length prior period computed
+  // for the summary strip's deltas. Balance sheet uses `to` as the as-of.
+  // The reconciliation candidates are the transactions closest in USD to
+  // the sheet's delta — same-day near-duplicates ranked first.
+
+  r.get("/projects/:id/finance/statements", async (c) => {
+    const userId = requireUser(c);
+    const projectId = uuidSchema.parse(c.req.param("id"));
+    const q = financeStatementsQuerySchema.safeParse(c.req.query());
+    if (!q.success) throw validationError("Invalid statements query.");
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const from = q.data.from ?? `${now.toISOString().slice(0, 7)}-01`;
+    const to = q.data.to ?? today;
+    // Prior period: same length, ending the day before `from`.
+    const spanMs =
+      new Date(`${to}T00:00:00Z`).getTime() -
+      new Date(`${from}T00:00:00Z`).getTime();
+    const priorTo = new Date(new Date(`${from}T00:00:00Z`).getTime() - 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const priorFrom = new Date(new Date(priorTo).getTime() - spanMs)
+      .toISOString()
+      .slice(0, 10);
+
+    const out = await withUser(userId, async (tx): Promise<FinanceStatements> => {
+      await resolveProjectAccess(tx, projectId, userId, { requireOwner: true });
+      const settings = await ensureSettings(tx, projectId);
+      const rate = settings.devexRate;
+      const refs = await loadTxRefs(tx, projectId);
+
+      // Period aggregate — used for the summary strip, income statement, and
+      // cash flow. Distributions are split out from expenses so we can subtract
+      // them from cash on their own line.
+      const periodAgg = async (a: string, b: string) =>
+        tx.execute<{
+          rev_robux: string;
+          rev_usd: string;
+          rev_usd_derived: string;
+          exp_paid_robux: string;
+          exp_paid_usd: string;
+          exp_unpaid_robux: string;
+          exp_unpaid_usd: string;
+          dist_robux: string;
+          dist_usd: string;
+          inv_robux: string;
+          inv_usd: string;
+          cashout_robux_out: string;
+          cashout_usd_in: string;
+        }>(sql`
+          select
+            coalesce(sum(amount_net) filter (where kind = 'revenue' and currency = 'robux'), 0)::text as rev_robux,
+            coalesce(sum(amount_net) filter (where kind = 'revenue' and currency = 'usd'), 0)::text as rev_usd,
+            coalesce(sum(amount_usd) filter (where kind = 'revenue'), 0)::text as rev_usd_derived,
+            coalesce(sum(cost_amount) filter (where kind = 'expense' and status = 'paid' and currency = 'robux'), 0)::text as exp_paid_robux,
+            coalesce(sum(cost_amount) filter (where kind = 'expense' and status = 'paid' and currency = 'usd'), 0)::text as exp_paid_usd,
+            coalesce(sum(cost_amount) filter (where kind = 'expense' and status = 'owed' and currency = 'robux'), 0)::text as exp_unpaid_robux,
+            coalesce(sum(cost_amount) filter (where kind = 'expense' and status = 'owed' and currency = 'usd'), 0)::text as exp_unpaid_usd,
+            coalesce(sum(cost_amount) filter (where kind = 'distribution' and currency = 'robux'), 0)::text as dist_robux,
+            coalesce(sum(cost_amount) filter (where kind = 'distribution' and currency = 'usd'), 0)::text as dist_usd,
+            coalesce(sum(amount_net) filter (where kind = 'investment' and currency = 'robux'), 0)::text as inv_robux,
+            coalesce(sum(amount_net) filter (where kind = 'investment' and currency = 'usd'), 0)::text as inv_usd,
+            coalesce(sum(robux_out) filter (where kind = 'cashout'), 0)::text as cashout_robux_out,
+            coalesce(sum(usd_in) filter (where kind = 'cashout'), 0)::text as cashout_usd_in
+          from finance_transactions
+          where project_id = ${projectId}
+            and occurred_on >= ${a} and occurred_on <= ${b}
+        `);
+      const pRow = must((await periodAgg(from, to)).rows[0], "period aggregate");
+      const priorRow = must(
+        (await periodAgg(priorFrom, priorTo)).rows[0],
+        "prior period aggregate",
+      );
+      const n = (row: Record<string, string>, k: string) => Number(row[k] ?? 0);
+
+      // Accrued splits over the period, needed for owner-earnings (accrual).
+      const splitAccrualsAgg = await tx.execute<{
+        currency: FinanceCurrency;
+        native: string;
+        usd: string;
+      }>(sql`
+        select currency, sum(amount_native)::text as native, sum(amount_usd)::text as usd
+        from finance_split_accruals
+        where project_id = ${projectId}
+          and occurred_on >= ${from} and occurred_on <= ${to}
+        group by currency
+      `);
+      const splitAccruedUsd = splitAccrualsAgg.rows.reduce(
+        (sum, row) => sum + Number(row.usd),
+        0,
+      );
+      const priorSplitAgg = await tx.execute<{ usd: string }>(sql`
+        select coalesce(sum(amount_usd), 0)::text as usd
+        from finance_split_accruals
+        where project_id = ${projectId}
+          and occurred_on >= ${priorFrom} and occurred_on <= ${priorTo}
+      `);
+      const priorSplitAccruedUsd = Number(priorSplitAgg.rows[0]?.usd ?? 0);
+
+      // Balance sheet as-of `to` — reuses balances() + splitOwedByPerson.
+      const bal = await balances(tx, projectId, settings, to);
+      const owedByPerson = await splitOwedByPerson(tx, projectId, to);
+      const accruedOutUsd = round2(
+        owedByPerson.reduce(
+          (sum, o) =>
+            sum +
+            (o.owed > 0
+              ? o.currency === "robux"
+                ? o.owed * rate
+                : o.owed
+              : 0),
+          0,
+        ),
+      );
+      const settledUsd = round2(
+        owedByPerson.reduce(
+          (sum, o) =>
+            sum + (o.currency === "robux" ? o.distributed * rate : o.distributed),
+          0,
+        ),
+      );
+      const asOfSheet = await tx.execute<{
+        rev_usd: string;
+        rev_robux: string;
+        exp_usd_cost: string;
+        exp_robux_cost: string;
+        owed_usd_cost: string;
+        owed_robux_cost: string;
+        inv_usd: string;
+        inv_robux: string;
+        cashout_usd_in: string;
+        cashout_robux_out: string;
+        dist_fee_usd: string;
+      }>(sql`
+        select
+          coalesce(sum(amount_net) filter (where kind = 'revenue' and currency = 'usd'), 0)::text as rev_usd,
+          coalesce(sum(amount_net) filter (where kind = 'revenue' and currency = 'robux'), 0)::text as rev_robux,
+          coalesce(sum(cost_amount) filter (where kind = 'expense' and currency = 'usd'), 0)::text as exp_usd_cost,
+          coalesce(sum(cost_amount) filter (where kind = 'expense' and currency = 'robux'), 0)::text as exp_robux_cost,
+          coalesce(sum(cost_amount) filter (where kind = 'expense' and currency = 'usd' and status = 'owed'), 0)::text as owed_usd_cost,
+          coalesce(sum(cost_amount) filter (where kind = 'expense' and currency = 'robux' and status = 'owed'), 0)::text as owed_robux_cost,
+          coalesce(sum(amount_net) filter (where kind = 'investment' and currency = 'usd'), 0)::text as inv_usd,
+          coalesce(sum(amount_net) filter (where kind = 'investment' and currency = 'robux'), 0)::text as inv_robux,
+          coalesce(sum(usd_in) filter (where kind = 'cashout'), 0)::text as cashout_usd_in,
+          coalesce(sum(robux_out) filter (where kind = 'cashout'), 0)::text as cashout_robux_out,
+          coalesce(sum(fee_amount) filter (where kind = 'distribution' and currency = 'usd'), 0)::text as dist_fee_usd
+        from finance_transactions
+        where project_id = ${projectId} and occurred_on <= ${to}
+      `);
+      const s = must(asOfSheet.rows[0], "as-of sheet");
+      const val = (usd: number, robux: number) => usd + robux * rate;
+      const assetsRobuxUsd = round2(bal.robux * rate);
+      const totalAssets = round2(bal.usd + assetsRobuxUsd);
+      const unpaidExpensesUsd = round2(
+        val(n(s, "owed_usd_cost"), n(s, "owed_robux_cost")),
+      );
+      const totalLiabilities = round2(unpaidExpensesUsd + accruedOutUsd);
+      const capitalInUsd = round2(
+        (settings.openingUsd ?? 0) +
+          (settings.openingRobux ?? 0) * rate +
+          val(n(s, "inv_usd"), n(s, "inv_robux")),
+      );
+      const retainedEarningsUsd = round2(
+        val(n(s, "rev_usd"), n(s, "rev_robux")) -
+          val(n(s, "exp_usd_cost"), n(s, "exp_robux_cost")) -
+          (accruedOutUsd + settledUsd) +
+          (n(s, "cashout_usd_in") - n(s, "cashout_robux_out") * rate) -
+          n(s, "dist_fee_usd"),
+      );
+      const totalEquity = round2(capitalInUsd + retainedEarningsUsd);
+      const deltaUsd = round2(totalAssets - totalLiabilities - totalEquity);
+      const reconciles = Math.abs(deltaUsd) < 0.01;
+
+      // Reconciliation candidates when delta ≠ 0: transactions ranked by how
+      // close their amount is to the delta. Same-day near-duplicates for the
+      // same person are lifted to the top.
+      let candidates: FinanceReconciliationCandidate[] = [];
+      if (!reconciles) {
+        const cRows = await tx.execute<{
+          id: string;
+          ref: string;
+          occurred_on: string;
+          description: string;
+          amount_usd: string;
+          person_id: string | null;
+          handle: string | null;
+          kind: FinanceKind;
+          distance: string;
+          same_day_dup: boolean;
+        }>(sql`
+          with target as (select ${Math.abs(deltaUsd)}::numeric as d)
+          select t.id, t.ref, t.occurred_on::text, t.description, t.amount_usd::text,
+                 t.person_id, p.discord_handle as handle, t.kind,
+                 abs(t.amount_usd - (select d from target))::text as distance,
+                 exists (
+                   select 1 from finance_transactions x
+                   where x.project_id = t.project_id and x.id <> t.id
+                     and x.occurred_on = t.occurred_on
+                     and x.person_id is not distinct from t.person_id
+                     and abs(x.amount_usd - t.amount_usd) < 5
+                 ) as same_day_dup
+          from finance_transactions t
+          left join people p on p.id = t.person_id
+          where t.project_id = ${projectId}
+          order by same_day_dup desc, distance asc
+          limit 20
+        `);
+        candidates = cRows.rows.map((row) => ({
+          txId: row.id,
+          ref: row.ref,
+          occurredOn: row.occurred_on,
+          description: row.description,
+          amountUsd: Number(row.amount_usd),
+          personId: row.person_id,
+          personHandle: row.handle,
+          kind: row.kind,
+          distanceUsd: round2(Number(row.distance)),
+          reason: row.same_day_dup
+            ? "same-day near-duplicate on this person"
+            : `amount within ${round2(Number(row.distance))} of delta`,
+        }));
+      }
+
+      // Cash-flow columns: opening = assets−(period movement). Uses the
+      // as-of balances at `to` (computed above) minus the period aggregate.
+      const revRobux = n(pRow, "rev_robux");
+      const revUsd = n(pRow, "rev_usd");
+      const expPaidRobux = n(pRow, "exp_paid_robux");
+      const expPaidUsd = n(pRow, "exp_paid_usd");
+      const expUnpaidRobux = n(pRow, "exp_unpaid_robux");
+      const expUnpaidUsd = n(pRow, "exp_unpaid_usd");
+      const distRobux = n(pRow, "dist_robux");
+      const distUsd = n(pRow, "dist_usd");
+      const invRobux = n(pRow, "inv_robux");
+      const invUsd = n(pRow, "inv_usd");
+      const cashoutRobuxOut = n(pRow, "cashout_robux_out");
+      const cashoutUsdIn = n(pRow, "cashout_usd_in");
+
+      const closingRobux = bal.robux;
+      const closingUsd = bal.usd;
+      const netRobux =
+        revRobux + invRobux - expPaidRobux - distRobux - cashoutRobuxOut;
+      const netUsd = revUsd + invUsd - expPaidUsd - distUsd + cashoutUsdIn;
+      const cashFlow: {
+        robux: FinanceCashFlowColumn;
+        usd: FinanceCashFlowColumn;
+      } = {
+        robux: {
+          currency: "robux",
+          opening: round2(closingRobux - netRobux),
+          revenueIn: revRobux,
+          expensesOut: expPaidRobux,
+          distributionsOut: distRobux,
+          capitalIn: invRobux,
+          cashoutTransfer: -cashoutRobuxOut,
+          closing: closingRobux,
+        },
+        usd: {
+          currency: "usd",
+          opening: round2(closingUsd - netUsd),
+          revenueIn: revUsd,
+          expensesOut: expPaidUsd,
+          distributionsOut: distUsd,
+          capitalIn: invUsd,
+          cashoutTransfer: cashoutUsdIn,
+          closing: closingUsd,
+        },
+      };
+
+      // Income statement rows. Owner earnings = revenue − paid − unpaid − split
+      // accruals (accrual basis) — the honest number, not revenue × your-share.
+      const revenueUsdVal = val(revUsd, revRobux);
+      const paidUsdVal = val(expPaidUsd, expPaidRobux);
+      const unpaidUsdVal = val(expUnpaidUsd, expUnpaidRobux);
+      const grossProfit = round2(revenueUsdVal - paidUsdVal - unpaidUsdVal);
+      const ownerEarningsUsd = round2(grossProfit - splitAccruedUsd);
+      const pct = (v: number) =>
+        revenueUsdVal > 0 ? round2(v / revenueUsdVal) : null;
+
+      const catAgg = await tx.execute<{
+        category_id: string | null;
+        spend_usd: string;
+        spend_robux: string;
+        tx_count: string;
+      }>(sql`
+        select category_id,
+          coalesce(sum(amount_usd), 0)::text as spend_usd,
+          coalesce(sum(cost_amount) filter (where currency = 'robux'), 0)::text as spend_robux,
+          count(*)::text as tx_count
+        from finance_transactions
+        where project_id = ${projectId} and kind = 'expense' and status = 'paid'
+          and occurred_on >= ${from} and occurred_on <= ${to}
+        group by category_id
+      `);
+      const byCategoryAttrib = catAgg.rows
+        .map((row) => {
+          const cat = row.category_id
+            ? refs.categoriesById.get(row.category_id)
+            : null;
+          const spendUsd = round2(Number(row.spend_usd));
+          return {
+            id: cat?.id ?? "uncategorised",
+            name: cat?.name ?? "Uncategorised",
+            color: cat?.color ?? "#8A90A0",
+            spendUsd,
+            txCount: Number(row.tx_count),
+            pct: paidUsdVal > 0 ? round2(spendUsd / paidUsdVal) : 0,
+          };
+        })
+        .sort((a, b) => b.spendUsd - a.spendUsd);
+
+      const personAgg = await tx.execute<{
+        person_id: string | null;
+        handle: string | null;
+        spend_usd: string;
+        tx_count: string;
+      }>(sql`
+        select t.person_id, p.discord_handle as handle,
+               coalesce(sum(t.amount_usd), 0)::text as spend_usd,
+               count(*)::text as tx_count
+        from finance_transactions t
+        left join people p on p.id = t.person_id
+        where t.project_id = ${projectId} and t.kind = 'expense' and t.status = 'paid'
+          and t.occurred_on >= ${from} and t.occurred_on <= ${to}
+        group by t.person_id, p.discord_handle
+      `);
+      const byPersonAttrib = personAgg.rows
+        .map((row) => {
+          const spendUsd = round2(Number(row.spend_usd));
+          return {
+            personId: row.person_id,
+            handle: row.handle,
+            spendUsd,
+            txCount: Number(row.tx_count),
+            pct: paidUsdVal > 0 ? round2(spendUsd / paidUsdVal) : 0,
+          };
+        })
+        .sort((a, b) => b.spendUsd - a.spendUsd);
+
+      // Split-owed per person, projected to statement rows for the splits line.
+      const splitByPerson = new Map<string, number>();
+      for (const row of splitAccrualsAgg.rows) {
+        // Roll all currencies into a person-agnostic total for the parent row;
+        // per-person split children come from splitsWithTotals.
+        splitByPerson.set(row.currency, Number(row.usd));
+      }
+      const splits = await splitsWithTotals(tx, projectId, refs.peopleById);
+      const splitChildren: FinanceStatementLine[] = splits.map((split) => {
+        const usd = split.accrued.reduce((sum, a) => {
+          if (a.currency === "usd") return sum + a.usd;
+          return sum + a.usd;
+        }, 0);
+        return {
+          label: `${split.person.discordHandle} — ${split.percent}%`,
+          robux: null,
+          usd: -round2(usd),
+          pctOfRevenue: pct(-usd),
+          basis: "accrual",
+        };
+      });
+
+      // Prior deltas.
+      const priorRevenueUsd = val(n(priorRow, "rev_usd"), n(priorRow, "rev_robux"));
+      const priorPaidUsd = val(n(priorRow, "exp_paid_usd"), n(priorRow, "exp_paid_robux"));
+      const priorUnpaidUsd = val(n(priorRow, "exp_unpaid_usd"), n(priorRow, "exp_unpaid_robux"));
+      const priorDistUsd = val(n(priorRow, "dist_usd"), n(priorRow, "dist_robux"));
+      const priorCashMove =
+        priorRevenueUsd -
+        priorPaidUsd -
+        priorDistUsd +
+        val(n(priorRow, "inv_usd"), n(priorRow, "inv_robux")) +
+        n(priorRow, "cashout_usd_in") -
+        n(priorRow, "cashout_robux_out") * rate;
+      const priorOwner =
+        priorRevenueUsd - priorPaidUsd - priorUnpaidUsd - priorSplitAccruedUsd;
+      const delta = (now: number, prev: number): number | null =>
+        prev === 0 || !Number.isFinite(prev)
+          ? null
+          : round2((now - prev) / Math.abs(prev));
+
+      const cashMovementUsd = round2(
+        revenueUsdVal -
+          paidUsdVal -
+          val(distUsd, distRobux) +
+          val(invUsd, invRobux) +
+          cashoutUsdIn -
+          cashoutRobuxOut * rate,
+      );
+
+      // Budget line — sum of monthly budgets whose month intersects the range.
+      const budgetsAgg = await tx.execute<{ usd: string }>(sql`
+        select coalesce(sum(amount_usd), 0)::text as usd
+        from finance_budgets
+        where project_id = ${projectId}
+          and month >= date_trunc('month', ${from}::date)
+          and month <= ${to}::date
+      `);
+      const budgetUsd = Number(budgetsAgg.rows[0]?.usd ?? 0);
+
+      // Recoup — lifetime, not period. The break-even question is "did the
+      // whole project ever cover its capital", not "did this month".
+      const lifetime = await tx.execute<{ inv: string; ret: string }>(sql`
+        select
+          coalesce(sum(amount_usd) filter (where kind = 'investment'), 0)::text as inv,
+          coalesce(sum(amount_usd) filter (where kind = 'revenue'), 0)::text as ret
+        from finance_transactions where project_id = ${projectId}
+      `);
+      const invLifetimeUsd = Number(lifetime.rows[0]?.inv ?? 0);
+      const retLifetimeUsd = Number(lifetime.rows[0]?.ret ?? 0);
+      const fullyRecouped = retLifetimeUsd >= invLifetimeUsd;
+
+      return {
+        from,
+        to,
+        rate,
+        priorFrom,
+        priorTo,
+        summary: {
+          revenue: {
+            robux: revRobux,
+            usd: revUsd,
+            basis: "accrual",
+          },
+          costsPaid: {
+            robux: expPaidRobux,
+            usd: expPaidUsd,
+            basis: "cash",
+          },
+          costsUnpaid: {
+            robux: expUnpaidRobux,
+            usd: expUnpaidUsd,
+            basis: "accrual",
+          },
+          ownerEarnings: { usd: ownerEarningsUsd, basis: "accrual" },
+          cashMovement: {
+            robux: netRobux,
+            usd: netUsd,
+            basis: "cash",
+          },
+          revenueDeltaPct: delta(revenueUsdVal, priorRevenueUsd),
+          costsDeltaPct: delta(paidUsdVal + unpaidUsdVal, priorPaidUsd + priorUnpaidUsd),
+          ownerEarningsDeltaPct: delta(ownerEarningsUsd, priorOwner),
+          cashMovementDeltaPct: delta(cashMovementUsd, priorCashMove),
+          budgetUsd: budgetUsd > 0 ? budgetUsd : null,
+          budgetPct:
+            budgetUsd > 0
+              ? round2((paidUsdVal + unpaidUsdVal) / budgetUsd)
+              : null,
+        },
+        incomeStatement: {
+          revenue: {
+            label: "Revenue",
+            robux: revRobux,
+            usd: revenueUsdVal,
+            pctOfRevenue: 1,
+            basis: "accrual",
+          },
+          directCosts: {
+            label: "Direct costs",
+            robux: -expPaidRobux,
+            usd: -paidUsdVal,
+            pctOfRevenue: pct(-paidUsdVal),
+            basis: "cash",
+            children: byCategoryAttrib.map((c) => ({
+              label: c.name,
+              robux: null,
+              usd: -c.spendUsd,
+              pctOfRevenue: pct(-c.spendUsd),
+              basis: "cash" as const,
+            })),
+          },
+          unpaidCosts: {
+            label: "Unpaid costs (accrued)",
+            robux: -expUnpaidRobux,
+            usd: -unpaidUsdVal,
+            pctOfRevenue: pct(-unpaidUsdVal),
+            basis: "accrual",
+          },
+          grossProfit: {
+            label: "Gross profit",
+            robux: null,
+            usd: grossProfit,
+            pctOfRevenue: pct(grossProfit),
+            basis: "accrual",
+          },
+          revenueSplitsAccrued: {
+            label: "Revenue splits accrued",
+            robux: null,
+            usd: -splitAccruedUsd,
+            pctOfRevenue: pct(-splitAccruedUsd),
+            basis: "accrual",
+            children: splitChildren,
+          },
+          ownerEarnings: {
+            label: "Owner earnings",
+            robux: null,
+            usd: ownerEarningsUsd,
+            pctOfRevenue: pct(ownerEarningsUsd),
+            basis: "accrual",
+          },
+        },
+        cashFlow,
+        balanceSheet: {
+          asOf: to,
+          assets: {
+            usd: bal.usd,
+            robux: bal.robux,
+            robuxUsd: assetsRobuxUsd,
+            total: totalAssets,
+          },
+          liabilities: {
+            unpaidExpensesUsd,
+            accruedSplitsUsd: accruedOutUsd,
+            total: totalLiabilities,
+          },
+          equity: {
+            capitalInUsd,
+            retainedEarningsUsd,
+            total: totalEquity,
+          },
+          reconciles,
+          deltaUsd,
+          candidates,
+        },
+        costAttribution: {
+          byCategory: byCategoryAttrib,
+          byPerson: byPersonAttrib,
+        },
+        recoup: {
+          capitalInUsd: invLifetimeUsd,
+          returnedUsd: retLifetimeUsd,
+          surplusUsd: fullyRecouped
+            ? round2(retLifetimeUsd - invLifetimeUsd)
+            : 0,
+          fullyRecouped,
+        },
+      };
+    });
+    return c.json(out);
+  });
+
+  /* ---- settle: atomic multi-person payout on selected rails ---- */
+  //
+  // One request creates N distribution rows (one per line). Robux and USD
+  // settle separately per §4.8.1 — the shape is already normalised, so this
+  // handler is a loop over lines with the same computeAmounts + insert path
+  // used by createFinanceTx. Accruals decrement implicitly (owed = accrued
+  // − distributed via splitOwedByPerson; no separate write).
+
+  r.post("/projects/:id/finance/settle", async (c) => {
+    const userId = requireUser(c);
+    const projectId = uuidSchema.parse(c.req.param("id"));
+    const body = financeSettleSchema.safeParse(
+      await c.req.json().catch(() => ({})),
+    );
+    if (!body.success)
+      throw validationError(
+        body.error.issues[0]?.message ?? "Invalid settle payload.",
+      );
+    const out = await withUser(
+      userId,
+      async (tx): Promise<FinanceSettleResult> => {
+        await resolveProjectAccess(tx, projectId, userId, {
+          requireOwner: true,
+        });
+        const settings = await ensureSettings(tx, projectId);
+        const created: string[] = [];
+        for (const line of body.data.lines) {
+          const amounts = computeAmounts(
+            {
+              kind: "distribution",
+              currency: line.currency,
+              amount: line.amountNative,
+              method: line.method,
+            },
+            settings.devexRate,
+          );
+          const occurredOn = line.occurredOn ?? todayIso();
+          // Retry ref generation once on a concurrent-insert collision, mirror
+          // of the createFinanceTx handler.
+          let inserted = false;
+          for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
+            const ref = await nextRef(tx, projectId);
+            try {
+              const [row] = await tx
+                .insert(financeTransactions)
+                .values({
+                  projectId,
+                  ref,
+                  kind: "distribution",
+                  occurredOn,
+                  description: line.note ?? "Settle-up payout",
+                  currency: amounts.currency,
+                  amountGross: amounts.amountGross,
+                  feeAmount: amounts.feeAmount,
+                  amountNet: amounts.amountNet,
+                  costAmount: amounts.costAmount,
+                  rateUsed: settings.devexRate,
+                  amountUsd: amounts.amountUsd,
+                  personId: line.personId,
+                  method: line.method,
+                  status: "paid",
+                  paidOn: occurredOn,
+                  note: line.note ?? null,
+                })
+                .returning({ id: financeTransactions.id });
+              const r = must(row, "settle insert");
+              created.push(r.id);
+              inserted = true;
+            } catch (err) {
+              if (isUniqueViolation(err) && attempt < 2) continue;
+              throw err;
+            }
+          }
+        }
+        return { createdTxIds: created };
+      },
+    );
+    return c.json(out, 201);
+  });
+
+  /* ---- CSV export: filtered transactions for the accountant ---- */
+  //
+  // Same filter shape as GET /finance/transactions, no cursor — the whole
+  // filtered set streams back. Headers match what an accountant expects:
+  // one row per ledger line, dates in YYYY-MM-DD, amounts as plain numbers.
+
+  r.get("/projects/:id/finance/export.csv", async (c) => {
+    const userId = requireUser(c);
+    const projectId = uuidSchema.parse(c.req.param("id"));
+    const q = financeTxQuerySchema.safeParse(c.req.query());
+    if (!q.success) throw validationError("Invalid export query.");
+    const csv = await withUser(userId, async (tx): Promise<string> => {
+      await resolveProjectAccess(tx, projectId, userId, { requireOwner: true });
+      const f = q.data;
+      const conds = [eq(financeTransactions.projectId, projectId)];
+      if (f.month) {
+        const { start, end } = monthRange(f.month);
+        conds.push(sql`${financeTransactions.occurredOn} >= ${start}`);
+        conds.push(sql`${financeTransactions.occurredOn} < ${end}`);
+      }
+      if (f.kind) conds.push(eq(financeTransactions.kind, f.kind));
+      if (f.category) conds.push(eq(financeTransactions.categoryId, f.category));
+      if (f.method) conds.push(eq(financeTransactions.method, f.method));
+      if (f.person) conds.push(eq(financeTransactions.personId, f.person));
+      if (f.status) conds.push(eq(financeTransactions.status, f.status));
+      if (f.milestone)
+        conds.push(eq(financeTransactions.milestoneId, f.milestone));
+      if (f.q)
+        conds.push(
+          sql`(${financeTransactions.description} ilike ${`%${f.q}%`} or ${financeTransactions.ref} ilike ${`%${f.q}%`})`,
+        );
+      const rows = await tx
+        .select()
+        .from(financeTransactions)
+        .where(and(...conds))
+        .orderBy(desc(financeTransactions.occurredOn), desc(financeTransactions.id));
+      const refs = await loadTxRefs(tx, projectId);
+      const esc = (v: string | number | null): string => {
+        if (v == null) return "";
+        const s = String(v);
+        // Escape CSV: wrap in quotes if it contains comma/quote/newline; double any internal quotes.
+        if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      };
+      const header = [
+        "ref",
+        "date",
+        "kind",
+        "status",
+        "currency",
+        "amount_gross",
+        "fee",
+        "amount_net",
+        "cost_amount",
+        "amount_usd",
+        "rate_used",
+        "method",
+        "person",
+        "category",
+        "description",
+        "paid_on",
+        "payment_ref",
+      ].join(",");
+      const lines = rows.map((row) => {
+        const person = row.personId
+          ? refs.peopleById.get(row.personId)?.discordHandle ?? ""
+          : "";
+        const category = row.categoryId
+          ? refs.categoriesById.get(row.categoryId)?.name ?? ""
+          : "";
+        return [
+          esc(row.ref),
+          esc(row.occurredOn),
+          esc(row.kind),
+          esc(row.status),
+          esc(row.currency),
+          esc(row.amountGross),
+          esc(row.feeAmount),
+          esc(row.amountNet),
+          esc(row.costAmount),
+          esc(row.amountUsd),
+          esc(row.rateUsed),
+          esc(row.method),
+          esc(person),
+          esc(category),
+          esc(row.description),
+          esc(row.paidOn),
+          esc(row.paymentRef),
+        ].join(",");
+      });
+      return `${header}\n${lines.join("\n")}\n`;
+    });
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="finance-${projectId}-${todayIso()}.csv"`,
+      },
+    });
   });
 
   /* ---- Roblox user lookup (fail soft — never block on it) ---- */
