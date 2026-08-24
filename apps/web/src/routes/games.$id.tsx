@@ -1,4 +1,11 @@
-import type { GameMetric, LifecycleEventType } from "@monkyesuite/shared";
+import type {
+  CohortSummary,
+  CreatorPortfolio,
+  GameMetric,
+  LifecycleEventType,
+  MoverCard,
+  PortfolioGame,
+} from "@monkyesuite/shared";
 import type { LifecycleStage as SharedLifecycleStage } from "@monkyesuite/shared";
 import {
   createFileRoute,
@@ -101,6 +108,9 @@ export const Route = createFileRoute("/games/$id")({
         demand,
         tags,
         notes,
+        creator,
+        movers,
+        cohort,
       ] = await Promise.all([
         api.game(id),
         api.metrics(id, "hour", metricsLimit),
@@ -112,6 +122,9 @@ export const Route = createFileRoute("/games/$id")({
         api.demand(id),
         api.gameTags(id),
         api.notes(id),
+        api.creator(id),
+        api.movers(id),
+        api.cohort(id),
       ]);
       return {
         game,
@@ -124,6 +137,9 @@ export const Route = createFileRoute("/games/$id")({
         demand,
         tags,
         notes,
+        creator,
+        movers,
+        cohort,
         ccuRange: deps.ccuRange as CcuRange,
       };
     } catch (err) {
@@ -157,6 +173,9 @@ function GameDetailPage() {
     demand,
     tags,
     notes,
+    creator,
+    movers,
+    cohort,
     ccuRange,
   } = Route.useLoaderData();
   const navigate = useNavigate({ from: "/games/$id" });
@@ -225,7 +244,7 @@ function GameDetailPage() {
   });
   const callLine = buildCallLine({
     lifecycle: pulseStage,
-    cohortPct: null,
+    cohortPct: cohort?.velocityPctInCohort ?? null,
     history: historyValues,
     daysTracked,
   });
@@ -464,6 +483,16 @@ function GameDetailPage() {
           <Tile label="Genre pct" value={fmtPct(s?.genrePercentile)} />
         </div>
       </section>
+
+      {cohort ? (
+        <CohortRow cohort={cohort} genre={game.robloxGenre} />
+      ) : null}
+
+      {creator && creator.games.length > 0 ? (
+        <CreatorContext data={creator} />
+      ) : null}
+
+      {movers.length > 0 ? <WhatElseMoving games={movers} /> : null}
 
       {/* ─── body grid ─────────────────────────────────────────────────── */}
       <div className="grid gap-8 px-6 py-8 lg:grid-cols-2 lg:px-10">
@@ -956,5 +985,209 @@ const fmtVotes = fmtVisitsHuman;
 
 function Empty({ children }: { children: ReactNode }) {
   return <div className="text-sm text-text-5">{children}</div>;
+}
+
+function CohortRow({
+  cohort,
+  genre,
+}: {
+  cohort: CohortSummary;
+  genre: string | null;
+}) {
+  const pct = cohort.velocityPctInCohort;
+  if (pct == null) return null;
+  const basisLabel =
+    cohort.cohortBasis === "genre"
+      ? genre
+        ? `${genre} peers`
+        : "genre peers"
+      : "global peers";
+  return (
+    <section
+      className="border-b border-border-1 px-6 py-4 lg:px-10"
+      style={{ borderColor: "var(--border-1)" }}
+    >
+      <div className="flex flex-wrap items-baseline gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-4">
+          Cohort
+        </span>
+        <span className="text-sm text-text-2">
+          <span className="tabular-nums font-semibold text-text-1">
+            {Math.round(pct)}
+          </span>
+          <span className="ml-1 text-text-4">
+            th pct velocity · {cohort.cohortSize} {basisLabel}
+          </span>
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function CreatorContext({ data }: { data: CreatorPortfolio }) {
+  const name = data.creator?.name ?? "Creator";
+  return (
+    <section className="border-b border-border-1 px-6 py-6 lg:px-10">
+      <div className="mb-3 flex items-baseline gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-4">
+          More from {name}
+        </span>
+        {data.creator?.hasVerifiedBadge ? (
+          <span className="inline-flex items-center">
+            <VerifiedBadge />
+          </span>
+        ) : null}
+      </div>
+      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {data.games.map((g) => (
+          <PortfolioTile key={g.universeId} game={g} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function PortfolioTile({ game }: { game: PortfolioGame }) {
+  const body = (
+    <div className="flex items-center gap-3">
+      <Thumb name={game.name ?? "·"} src={game.iconUrl} size={44} radius={10} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm text-text-2">
+          {game.name ?? `#${game.universeId}`}
+        </div>
+        <div className="text-[11px] text-text-4 tabular-nums">
+          {game.latestCcu != null
+            ? `${fmtCCUCompact(game.latestCcu)} CCU`
+            : game.visits != null
+              ? `${fmtVisitsHuman(game.visits)} visits`
+              : "not tracked"}
+          {game.pulseStage ? (
+            <span
+              className="ml-1.5 rounded px-1 py-px text-[9px] uppercase tracking-wide"
+              style={{
+                background: "var(--surface-hover)",
+                color: `var(--lifecycle-${game.pulseStage})`,
+              }}
+            >
+              {game.pulseStage}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+  const cls =
+    "rounded-lg border border-border-1 bg-surface-1/40 p-3 transition hover:bg-surface-hover";
+  if (game.isTracked) {
+    return (
+      <li>
+        <Link
+          to="/games/$id"
+          params={{ id: String(game.universeId) }}
+          className={cls}
+        >
+          {body}
+        </Link>
+      </li>
+    );
+  }
+  return <li className={cls}>{body}</li>;
+}
+
+function WhatElseMoving({ games }: { games: MoverCard[] }) {
+  return (
+    <section className="border-b border-border-1 px-6 py-6 lg:px-10">
+      <div className="mb-3 flex items-baseline gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-4">
+          What else is moving
+        </span>
+        <span className="text-xs text-text-5">Same genre · pulse-ranked</span>
+      </div>
+      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {games.map((g) => (
+          <li key={g.universeId}>
+            <Link
+              to="/games/$id"
+              params={{ id: String(g.universeId) }}
+              className="flex flex-col gap-1.5 rounded-lg border border-border-1 bg-surface-1/40 p-2.5 transition hover:bg-surface-hover"
+            >
+              <div className="flex items-center gap-2">
+                <Thumb
+                  name={g.name}
+                  src={g.iconUrl}
+                  size={32}
+                  radius={8}
+                />
+                <div className="min-w-0 flex-1 truncate text-[13px] text-text-2">
+                  {g.name}
+                </div>
+              </div>
+              <MoverSpark spark={g.spark} stage={g.pulseStage} />
+              <div className="flex items-baseline justify-between text-[11px] tabular-nums">
+                <span className="text-text-3">
+                  {fmtCCUCompact(g.latestCcu)}
+                </span>
+                {g.delta24hPct != null ? (
+                  <span
+                    className="font-semibold"
+                    style={{ color: deltaColorVar(g.delta24hPct / 100) }}
+                  >
+                    {g.delta24hPct > 0 ? "+" : ""}
+                    {Math.round(g.delta24hPct)}%
+                  </span>
+                ) : null}
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function MoverSpark({
+  spark,
+  stage,
+}: {
+  spark: number[] | null;
+  stage: string | null;
+}) {
+  if (!spark || spark.length < 2) {
+    return <div className="h-6" />;
+  }
+  const w = 100;
+  const h = 24;
+  const min = Math.min(...spark);
+  const max = Math.max(...spark);
+  const span = max - min || 1;
+  const step = w / (spark.length - 1);
+  const line = spark
+    .map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / span) * (h - 2) - 1).toFixed(1)}`)
+    .join(" ");
+  const color =
+    stage === "declining"
+      ? "var(--lifecycle-declining)"
+      : stage === "peaking"
+        ? "var(--lifecycle-peaking)"
+        : stage === "new"
+          ? "var(--lifecycle-new)"
+          : "var(--lifecycle-growing)";
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="h-6 w-full"
+      preserveAspectRatio="none"
+      role="img"
+    >
+      <title>Recent CCU trend</title>
+      <polyline
+        points={line}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
 }
 

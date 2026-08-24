@@ -7,6 +7,8 @@
 // rather than a silent empty result (07-api.md §7.5).
 
 import type {
+  CohortSummary,
+  CreatorPortfolio,
   DemandOverlay,
   DiscoverItem,
   IntelPayload,
@@ -17,6 +19,7 @@ import type {
   GameStat,
   LifecycleEvent,
   Monetization,
+  MoverCard,
   Paged,
   PulsePayload,
   PulseSearchResult,
@@ -44,6 +47,8 @@ import { toAuthEmail, toDisplayUsername } from "./identity.js";
 import { TTL, TtlCache } from "./cache.js";
 import {
   gameExists,
+  getCohort,
+  getCreatorPortfolio,
   getDemand,
   getEvents,
   getFeed,
@@ -53,6 +58,7 @@ import {
   getLifecycleEvents,
   getMetrics,
   getMonetization,
+  getMovers,
   getPulse,
   getPulseSearch,
   getSorts,
@@ -104,6 +110,9 @@ const monetizationCache = new TtlCache<Monetization>(TTL.timeseries);
 const demandCache = new TtlCache<DemandOverlay>(TTL.timeseries);
 const gameTagsCache = new TtlCache<Tag[]>(TTL.tags);
 const tagsCache = new TtlCache<Tag[]>(TTL.tags);
+const creatorCache = new TtlCache<CreatorPortfolio | null>(TTL.timeseries);
+const moversCache = new TtlCache<MoverCard[]>(TTL.timeseries);
+const cohortCache = new TtlCache<CohortSummary | null>(TTL.timeseries);
 // Pulse: 30s in-process memo mirrors the s-maxage sent to CDN, so a Railway
 // instance still absorbs bursty request-path hits between edge revalidations.
 const pulseCache = new TtlCache<PulsePayload>(30_000);
@@ -329,6 +338,32 @@ export function createApp() {
     const id = parseUniverseId(c.req.param("universeId"));
     await assertGame(id);
     return c.json(await gameTagsCache.get(String(id), () => getGameTags(id)));
+  });
+
+  // Creator portfolio — the game's creator + other games (top by visits).
+  // Untracked portfolio rows come back with null CCU/lifecycle so the UI can
+  // render them as name-only alongside tracked-with-signal rows.
+  v1.get("/games/:universeId/creator", async (c) => {
+    const id = parseUniverseId(c.req.param("universeId"));
+    await assertGame(id);
+    return c.json(
+      await creatorCache.get(String(id), () => getCreatorPortfolio(id)),
+    );
+  });
+
+  // What-else-moving — same-genre pulse-spike peers, self excluded.
+  v1.get("/games/:universeId/movers", async (c) => {
+    const id = parseUniverseId(c.req.param("universeId"));
+    await assertGame(id);
+    return c.json(await moversCache.get(String(id), () => getMovers(id)));
+  });
+
+  // Cohort summary — velocity percentile in cohort + basis. Drives the hero's
+  // cohort-basis chip and the call-line's "top of its cohort" branch.
+  v1.get("/games/:universeId/cohort", async (c) => {
+    const id = parseUniverseId(c.req.param("universeId"));
+    await assertGame(id);
+    return c.json(await cohortCache.get(String(id), () => getCohort(id)));
   });
 
   /* ------------------------------ tags ---------------------------------- */

@@ -5,6 +5,7 @@
 
 import {
   cohortStats,
+  creatorPortfolio,
   creators,
   demandSnapshots,
   demandTerms,
@@ -25,6 +26,8 @@ import {
 } from "@monkyesuite/database";
 import type {
   CohortBasis,
+  CohortSummary,
+  CreatorPortfolio,
   DemandOverlay,
   FeedItem,
   FeedQuery,
@@ -36,7 +39,9 @@ import type {
   LifecycleEvent,
   MetricsQuery,
   Monetization,
+  MoverCard,
   Paged,
+  PortfolioGame,
   PulseCardGame,
   PulseFilter,
   PulsePayload,
@@ -595,6 +600,151 @@ async function genreCcuSlope(genreLabel: string): Promise<number | null> {
     .innerJoin(games, eq(games.universeId, latest.universeId))
     .where(eq(games.robloxGenre, genreLabel));
   return row?.slope ?? null;
+}
+
+/* ------------------------- game-detail side panels ------------------------ */
+
+/**
+ * getCreatorPortfolio — the creator's other games (top by visits, self
+ * excluded). Joins in game_stats_latest so tracked-portfolio rows come back
+ * with a lifecycle + latestCcu; untracked rows survive with null overlays.
+ * Aggregation stays in SQL — the row list is bounded by LIMIT, not a JS
+ * slice over the whole portfolio.
+ */
+export async function getCreatorPortfolio(
+  universeId: number,
+  limit = 8,
+): Promise<CreatorPortfolio | null> {
+  const [game] = await db
+    .select({ creatorId: games.creatorId })
+    .from(games)
+    .where(eq(games.universeId, universeId))
+    .limit(1);
+  if (!game?.creatorId) return null;
+
+  const [creator] = await db
+    .select()
+    .from(creators)
+    .where(eq(creators.creatorId, game.creatorId))
+    .limit(1);
+
+  const rows = await db
+    .select({
+      universeId: creatorPortfolio.universeId,
+      name: creatorPortfolio.name,
+      visits: creatorPortfolio.visits,
+      iconUrl: games.iconUrl,
+      latestCcu: gameStatsLatest.latestCcu,
+      pulseStage: gameStatsLatest.pulseStage,
+      isTracked: games.isTracked,
+    })
+    .from(creatorPortfolio)
+    .leftJoin(games, eq(games.universeId, creatorPortfolio.universeId))
+    .leftJoin(
+      gameStatsLatest,
+      eq(gameStatsLatest.universeId, creatorPortfolio.universeId),
+    )
+    .where(
+      and(
+        eq(creatorPortfolio.creatorId, game.creatorId),
+        ne(creatorPortfolio.universeId, universeId),
+      ),
+    )
+    .orderBy(desc(creatorPortfolio.visits))
+    .limit(limit);
+
+  return {
+    creator: creator
+      ? {
+          creatorId: creator.creatorId,
+          type: creator.type,
+          name: creator.name,
+          hasVerifiedBadge: creator.hasVerifiedBadge,
+          memberCount: creator.memberCount,
+        }
+      : null,
+    games: rows.map<PortfolioGame>((r) => ({
+      universeId: r.universeId,
+      name: r.name,
+      visits: r.visits,
+      iconUrl: r.iconUrl ?? null,
+      latestCcu: r.latestCcu ?? null,
+      pulseStage: r.pulseStage as PulseStage | null,
+      isTracked: r.isTracked ?? false,
+    })),
+  };
+}
+
+/**
+ * getMovers — "what else is moving right now": top pulse-spike peers in the
+ * same genre as the target (or global if genre is null). Excludes self. Reads
+ * exclusively from game_stats_latest so a single index scan carries the row.
+ */
+export async function getMovers(
+  universeId: number,
+  limit = 6,
+): Promise<MoverCard[]> {
+  const [game] = await db
+    .select({ genre: games.robloxGenre })
+    .from(games)
+    .where(eq(games.universeId, universeId))
+    .limit(1);
+  const genre = game?.genre ?? null;
+
+  const conds: SQL[] = [
+    ne(games.universeId, universeId),
+    gte(gameStatsLatest.latestCcu, 200),
+    ne(gameStatsLatest.pulseStage, "declining"),
+  ];
+  if (genre) conds.push(eq(games.robloxGenre, genre));
+
+  const rows = await db
+    .select({
+      universeId: games.universeId,
+      name: games.name,
+      iconUrl: games.iconUrl,
+      latestCcu: gameStatsLatest.latestCcu,
+      delta24hPct: gameStatsLatest.delta24hPct,
+      pulseStage: gameStatsLatest.pulseStage,
+      spark: gameStatsLatest.spark,
+    })
+    .from(games)
+    .innerJoin(gameStatsLatest, eq(gameStatsLatest.universeId, games.universeId))
+    .where(and(...conds))
+    .orderBy(pulseSpikeOrder())
+    .limit(limit);
+
+  return rows.map<MoverCard>((r) => ({
+    universeId: r.universeId,
+    name: r.name,
+    iconUrl: r.iconUrl,
+    latestCcu: r.latestCcu,
+    delta24hPct: r.delta24hPct,
+    pulseStage: r.pulseStage as PulseStage | null,
+    spark: Array.isArray(r.spark) ? (r.spark as number[]) : null,
+  }));
+}
+
+/**
+ * getCohort — the game's cohort percentile summary. Reads cohort_stats
+ * directly (already denormalized by derive); returns null when the game has no
+ * cohort row yet (too new, or its cohort was too small to compute against).
+ */
+export async function getCohort(
+  universeId: number,
+): Promise<CohortSummary | null> {
+  const [row] = await db
+    .select()
+    .from(cohortStats)
+    .where(eq(cohortStats.universeId, universeId))
+    .limit(1);
+  if (!row) return null;
+  return {
+    velocityPctInCohort: row.velocityPctInCohort,
+    cohortBasis: row.cohortBasis as CohortBasis | null,
+    cohortSize: row.cohortSize,
+    computedAt: isoReq(row.computedAt),
+  };
 }
 
 /* --------------------------------- tags ----------------------------------- */

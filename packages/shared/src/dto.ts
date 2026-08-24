@@ -194,6 +194,49 @@ export interface DemandOverlay {
   terms: DemandTerm[];
 }
 
+/* ------------------------ game-detail side panels ------------------------- */
+
+// A single game in a creator's portfolio row. `iconUrl` and `latestCcu` are
+// carried only when we're already tracking the game (LEFT JOIN); untracked
+// portfolio entries render as name + visits only.
+export interface PortfolioGame {
+  universeId: number;
+  name: string | null;
+  visits: number | null;
+  iconUrl: string | null;
+  latestCcu: number | null;
+  pulseStage: PulseStage | null;
+  isTracked: boolean;
+}
+
+export interface CreatorPortfolio {
+  creator: Creator | null;
+  games: PortfolioGame[];
+}
+
+// One "what else is moving right now" peer card. Sparks + delta come from
+// game_stats_latest so the row is a single indexed scan (no per-card metric
+// fetch).
+export interface MoverCard {
+  universeId: number;
+  name: string;
+  iconUrl: string | null;
+  latestCcu: number;
+  delta24hPct: number | null;
+  pulseStage: PulseStage | null;
+  spark: number[] | null;
+}
+
+// Cohort summary — the per-game percentile within its cohort, plus how the
+// cohort was assembled. Drives the hero's cohort-basis chip and the
+// call-line's "top of its cohort" branch.
+export interface CohortSummary {
+  velocityPctInCohort: number | null;
+  cohortBasis: CohortBasis | null;
+  cohortSize: number;
+  computedAt: string;
+}
+
 export interface Tag {
   id: string;
   axis: TagAxis;

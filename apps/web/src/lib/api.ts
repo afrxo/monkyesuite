@@ -8,8 +8,10 @@ import type {
   Block,
   BlockInput,
   Board,
+  CohortSummary,
   CreateChecklistItemInput,
   CreateCommentInput,
+  CreatorPortfolio,
   CreateDocFolderInput,
   CreateDocInput,
   CreateFinancePersonInput,
@@ -46,6 +48,7 @@ import type {
   GameStat,
   IntelPayload,
   LifecycleEvent,
+  MoverCard,
   LifecycleStage,
   LinkedNote,
   Membership,
@@ -200,6 +203,10 @@ export const api = {
   demand: (id: number) => get<DemandOverlay>(`/games/${id}/demand`),
   gameTags: (id: number) => get<Tag[]>(`/games/${id}/tags`),
   notes: (id: number) => get<GameNote[]>(`/games/${id}/notes`),
+  creator: (id: number) =>
+    get<CreatorPortfolio | null>(`/games/${id}/creator`),
+  movers: (id: number) => get<MoverCard[]>(`/games/${id}/movers`),
+  cohort: (id: number) => get<CohortSummary | null>(`/games/${id}/cohort`),
 
   // Game-note authoring (auth required; author-gated at the API).
   createNote: (id: number, input: CreateGameNoteInput) =>
@@ -354,6 +361,19 @@ export const api = {
     get<FinanceOverview>(`/projects/${id}/finance/overview${qs({ month })}`),
   financePosition: (id: string, period: string = "all") =>
     get<FinancePosition>(`/projects/${id}/finance/position${qs({ period })}`),
+  financeStatements: (id: string, from?: string, to?: string) =>
+    get<FinanceStatements>(
+      `/projects/${id}/finance/statements${qs({ from, to })}`,
+    ),
+  financeSettle: (id: string, input: FinanceSettleInput) =>
+    post<FinanceSettleResult>(`/projects/${id}/finance/settle`, input),
+  // Returns the CSV URL (does not stream) — callers open it directly so
+  // browser handles the download flow.
+  financeExportCsvUrl: (
+    id: string,
+    params: Record<string, string | undefined> = {},
+  ): string =>
+    `${API_BASE}/projects/${id}/finance/export.csv${qs({ ...params })}`,
 
   financeTransactions: (
     id: string,
