@@ -15,18 +15,18 @@ import (
 const EventsConcurrency = 10
 
 // EventsTickInterval is the cadence at which the events job fires, expressed
-// in ticks of the base 5-min loop. 36 * 5min = 3h. Was 1 (every tick) with a
+// in ticks of the base 5-min loop. 12 * 5min = 1h. Was 1 (every tick) with a
 // 12-way universeId bucket that spread the fan-out over an hour; empirically
-// the event flag is slow-moving enough that a full sweep every 3h keeps
-// signal quality while cutting the roblox call rate by ~36×. Cron mode
-// ignores this — the cron schedule is the authority there.
-const EventsTickInterval = 36
+// a full sweep every hour keeps the update_shipped window (~1h) intact while
+// still cutting the roblox call rate by ~12×. Cron mode ignores this — the
+// cron schedule is the authority there.
+const EventsTickInterval = 12
 
 // updateShippedWindow is how recently an event must have gone live to emit an
 // update_shipped lifecycle event on first ingestion (§1.3, ~1h).
 const updateShippedWindow = time.Hour
 
-// eventsJob polls each tracked game's virtual events. Fires every 3h in the
+// eventsJob polls each tracked game's virtual events. Fires every 1h in the
 // persistent loop (see EventsTickInterval) and on whatever schedule the
 // events cron service is configured with; in either mode it sweeps the full
 // tracked set in one run, fanned out at EventsConcurrency.
