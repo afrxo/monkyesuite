@@ -16,9 +16,22 @@ RUN go mod download
 
 COPY apps/worker/ ./
 
-# CGO off → a static binary that runs on a bare alpine. internal/store/sql/*.sql
+# CGO off → static binaries that run on bare alpine. internal/store/sql/*.sql
 # are //go:embed-ed into the binary, so no SQL files are copied at runtime.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
+#
+# One image, many entrypoints: /worker keeps the persistent tick loop working
+# (kept only during the cron migration; retired once cron parity is proven);
+# /snapshot, /discover, … are the per-job cron entrypoints. Each Railway cron
+# service points at this same image and sets startCommand to the binary it
+# runs, so the image lifecycle stays single-source.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker        ./cmd/worker \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/snapshot      ./cmd/snapshot \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/discover      ./cmd/discover \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/events        ./cmd/events \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/enrich        ./cmd/enrich \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/demand        ./cmd/demand \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/icon_backfill ./cmd/icon_backfill \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/trend_drift   ./cmd/trend_drift
 
 # ---------------------------------------------------------------------------
 # runtime — alpine, NOT scratch
@@ -30,12 +43,23 @@ FROM alpine:3.21 AS runtime
 RUN apk add --no-cache ca-certificates tzdata \
   && adduser -D -H -u 10001 worker
 
-COPY --from=builder /out/worker /worker
+COPY --from=builder /out/worker        /worker
+COPY --from=builder /out/snapshot      /snapshot
+COPY --from=builder /out/discover      /discover
+COPY --from=builder /out/events        /events
+COPY --from=builder /out/enrich        /enrich
+COPY --from=builder /out/demand        /demand
+COPY --from=builder /out/icon_backfill /icon_backfill
+COPY --from=builder /out/trend_drift   /trend_drift
 
 USER worker
 
-# No EXPOSE and no healthcheck path: the worker serves no HTTP. It is a tick
-# loop, not a service — health is read from job_runs rows and control from
-# job_commands rows (packages/database/src/schema.ts). It exits on SIGTERM via
-# signal.NotifyContext, which is what Railway sends on redeploy.
+# No EXPOSE and no healthcheck path: the worker serves no HTTP. Persistent
+# loop reads job_runs / job_commands; cron entrypoints exit on completion.
+# All variants respect SIGTERM through signal.NotifyContext, which is what
+# Railway sends when a deploy replaces the pod or a cron slot runs long.
+#
+# Default entrypoint remains /worker so an existing service without a start
+# command override keeps its old behavior. Each cron service SHOULD override
+# with the specific binary path (see apps/worker/cron/*.railway.toml).
 ENTRYPOINT ["/worker"]

@@ -1,0 +1,18 @@
+# monkye-trend-drift — Railway cron service.
+#
+# On the monkye-trend-drift service, set:
+#   Config-as-code path = apps/worker/cron/trend_drift.railway.toml
+#
+# Daily confirmation-rule query. SQL only — the log line + OTEL counter is
+# the record; no rows persisted.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/worker/Dockerfile"
+watchPatterns = ["apps/worker/**"]
+
+[deploy]
+startCommand = "/trend_drift"
+restartPolicyType = "NEVER"
+numReplicas = 1
+cronSchedule = "37 4 * * *"

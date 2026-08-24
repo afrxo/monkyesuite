@@ -1,0 +1,17 @@
+# monkye-events — Railway cron service.
+#
+# On the monkye-events service, set:
+#   Config-as-code path = apps/worker/cron/events.railway.toml
+#
+# Every 15 minutes — event flag on game_metrics only needs bucketed refresh.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/worker/Dockerfile"
+watchPatterns = ["apps/worker/**"]
+
+[deploy]
+startCommand = "/events"
+restartPolicyType = "NEVER"
+numReplicas = 1
+cronSchedule = "3-59/15 * * * *"

@@ -1,0 +1,23 @@
+# monkye-snapshot — Railway cron service.
+#
+# On the monkye-snapshot service, set:
+#   Config-as-code path = apps/worker/cron/snapshot.railway.toml
+#
+# One Dockerfile, seven entrypoints — this service's binary is /snapshot,
+# which runs snapshot then derive in one process so ordering is guaranteed.
+#
+# Every-tick cadence (5 min) matches the retired loop's snapshot tier.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/worker/Dockerfile"
+watchPatterns = ["apps/worker/**"]
+
+[deploy]
+startCommand = "/snapshot"
+# One-shot per cron slot: exit 0 is success, exit non-zero is a failure the
+# Grafana alert catches. numReplicas stays 1 — parallel runs would double-
+# insert metrics (idempotent, but wasteful).
+restartPolicyType = "NEVER"
+numReplicas = 1
+cronSchedule = "*/5 * * * *"

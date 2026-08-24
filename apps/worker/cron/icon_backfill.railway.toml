@@ -1,0 +1,18 @@
+# monkye-icon-backfill — Railway cron service.
+#
+# On the monkye-icon-backfill service, set:
+#   Config-as-code path = apps/worker/cron/icon_backfill.railway.toml
+#
+# Hourly at minute 27. Backfills games.icon_url for tracked games discover
+# missed — pulse reads icon_url directly, so a null icon is a blank card.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/worker/Dockerfile"
+watchPatterns = ["apps/worker/**"]
+
+[deploy]
+startCommand = "/icon_backfill"
+restartPolicyType = "NEVER"
+numReplicas = 1
+cronSchedule = "27 * * * *"

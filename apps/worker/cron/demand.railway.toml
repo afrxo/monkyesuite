@@ -1,0 +1,18 @@
+# monkye-demand — Railway cron service.
+#
+# On the monkye-demand service, set:
+#   Config-as-code path = apps/worker/cron/demand.railway.toml
+#
+# Daily YouTube + Trends snapshot. YouTube quota resets at PT midnight,
+# so run early UTC (matches the loop's default day-tick 0 semantics).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/worker/Dockerfile"
+watchPatterns = ["apps/worker/**"]
+
+[deploy]
+startCommand = "/demand"
+restartPolicyType = "NEVER"
+numReplicas = 1
+cronSchedule = "23 8 * * *"

@@ -1,0 +1,18 @@
+# monkye-enrich — Railway cron service.
+#
+# On the monkye-enrich service, set:
+#   Config-as-code path = apps/worker/cron/enrich.railway.toml
+#
+# Daily fan-out drain. Deadline inside /enrich is 25 minutes; the cron slot
+# above that guards against a runaway.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/worker/Dockerfile"
+watchPatterns = ["apps/worker/**"]
+
+[deploy]
+startCommand = "/enrich"
+restartPolicyType = "NEVER"
+numReplicas = 1
+cronSchedule = "17 3 * * *"

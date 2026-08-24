@@ -1,0 +1,18 @@
+# monkye-discover — Railway cron service.
+#
+# On the monkye-discover service, set:
+#   Config-as-code path = apps/worker/cron/discover.railway.toml
+#
+# Offset 2 minutes from snapshot so the two jobs share the Roblox rate
+# budget cleanly — snapshot at :00/:05/:10, discover at :02/:07/:12.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/worker/Dockerfile"
+watchPatterns = ["apps/worker/**"]
+
+[deploy]
+startCommand = "/discover"
+restartPolicyType = "NEVER"
+numReplicas = 1
+cronSchedule = "2-59/5 * * * *"
