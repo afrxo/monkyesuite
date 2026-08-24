@@ -9,8 +9,10 @@ service on Railway with the same name.
 2. Settings → Config-as-code path: `apps/worker/cron/<name>.railway.toml`.
 3. Variables — set:
    - `DATABASE_URL` — service role (`monkye_service`, `BYPASSRLS`).
-   - `OTEL_EXPORTER_OTLP_ENDPOINT` — Grafana Cloud OTLP URL.
-   - `OTEL_EXPORTER_OTLP_HEADERS` — `Authorization=Basic <base64(instance:token)>`.
+   - `HEALTHCHECKS_PING_KEY` — the ping key from healthchecks.io
+     (Project Settings → Ping Key). Same value across every service;
+     each job pings a distinct slug so healthchecks.io auto-creates
+     one check per job.
    - `YOUTUBE_API_KEY` (demand only).
 4. Deploy. Cron schedule is honored on next scheduled fire; the initial
    deploy does not run the entrypoint.
