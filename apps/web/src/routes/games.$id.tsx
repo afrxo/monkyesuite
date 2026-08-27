@@ -1203,22 +1203,50 @@ function UpdateCadence({
   events: GameEvent[];
   lifecycle: LifecycleEvent[];
 }) {
+  // Split game_events by startUtc — the trend-pulse rail treats one stream as
+  // "upcoming card" and past ones as "history card", so a single query drives
+  // both scrollers. Past events without a title/thumbnail get backfilled from
+  // the lifecycle_events update_shipped rows so long-tracked games still show
+  // shipped-update dots even when game_events is thin.
+  const now = Date.now();
   const upcoming = events
-    .filter((e) => e.startUtc && Date.parse(e.startUtc) > Date.now())
-    .sort((a, b) => Date.parse(a.startUtc ?? "") - Date.parse(b.startUtc ?? ""));
+    .filter((e) => e.startUtc && Date.parse(e.startUtc) > now)
+    .sort(
+      (a, b) => Date.parse(a.startUtc ?? "") - Date.parse(b.startUtc ?? ""),
+    );
+  const pastGameEvents = events
+    .filter((e) => e.startUtc && Date.parse(e.startUtc) <= now)
+    .sort(
+      (a, b) => Date.parse(b.startUtc ?? "") - Date.parse(a.startUtc ?? ""),
+    );
   const updates = lifecycle
-    .filter((e) => e.type === "update_shipped")
+    .filter((u) => u.type === "update_shipped")
     .sort((a, b) => Date.parse(b.detectedAt) - Date.parse(a.detectedAt));
+  const history: HistoryEntry[] = pastGameEvents.length
+    ? pastGameEvents.map((e) => ({
+        id: e.eventId,
+        startUtc: Date.parse(e.startUtc ?? ""),
+        title: e.title ?? "Update",
+        thumbnailUrl: e.thumbnailUrl,
+        ccuLift24hPct: null,
+      }))
+    : updates.map((u) => ({
+        id: u.id,
+        startUtc: Date.parse(u.detectedAt),
+        title: "Update shipped",
+        thumbnailUrl: null,
+        ccuLift24hPct: null,
+      }));
 
-  // Mean days between the ~last 8 shipped updates, if we have at least two.
+  // Mean days between the ~last 8 shipped updates.
   let cadenceLine: string | null = null;
-  if (updates.length >= 2) {
-    const recent = updates.slice(0, 8);
+  if (history.length >= 2) {
+    const recent = history.slice(0, 8);
     let sum = 0;
     let n = 0;
     for (let i = 0; i < recent.length - 1; i++) {
-      const a = Date.parse(recent[i]?.detectedAt ?? "");
-      const b = Date.parse(recent[i + 1]?.detectedAt ?? "");
+      const a = recent[i]?.startUtc ?? 0;
+      const b = recent[i + 1]?.startUtc ?? 0;
       if (a && b && a > b) {
         sum += a - b;
         n++;
@@ -1229,89 +1257,320 @@ function UpdateCadence({
       cadenceLine = `Updates every ${meanDays.toFixed(1)}d avg`;
     }
   }
-  if (upcoming.length === 0 && updates.length === 0) return null;
+  if (upcoming.length === 0 && history.length === 0) return null;
   return (
-    <section className="border-b border-border-1 px-6 py-6 lg:px-10">
-      <div className="mb-3 flex items-baseline gap-3">
+    <section
+      className="border-b border-border-1 px-6 py-6 lg:px-10"
+      style={{ borderColor: "var(--border-1)" }}
+    >
+      <div className="mb-2 flex items-baseline gap-3.5">
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-4">
-          Update cadence
+          The Update Cadence
         </span>
-        {cadenceLine ? (
-          <span className="text-xs text-text-5">{cadenceLine}</span>
-        ) : null}
+        <span className="text-xs text-text-4">
+          What's coming, what's shipped, what it's worth.
+        </span>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div>
-          <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-text-4">
-            Upcoming
-          </div>
-          {upcoming.length ? (
-            <ul className="flex flex-col gap-2 text-sm">
-              {upcoming.slice(0, 4).map((e) => {
-                const start = e.startUtc ? Date.parse(e.startUtc) : 0;
-                const diff = start - Date.now();
-                const days = Math.floor(diff / DAY_MS);
-                const hours = Math.floor((diff % DAY_MS) / HOUR_MS);
-                const when =
-                  days > 0
-                    ? `${days}d ${hours}h`
-                    : hours > 0
-                      ? `${hours}h`
-                      : "soon";
-                return (
-                  <li
-                    key={e.eventId}
-                    className="rounded-lg border border-border-1 bg-surface-1/40 p-3"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <div className="font-medium text-text-2">
-                        {e.title ?? "Event"}
-                      </div>
-                      <div className="text-[11px] text-text-4 tabular-nums">
-                        in {when}
-                      </div>
-                    </div>
-                    {e.subtitle ? (
-                      <div className="text-xs text-text-4">{e.subtitle}</div>
-                    ) : null}
-                    {e.tagline ? (
-                      <div className="mt-1 text-xs text-text-3">
-                        {e.tagline}
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <Empty>No scheduled events.</Empty>
-          )}
-        </div>
-        <div>
-          <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-text-4">
-            Recent updates
-          </div>
-          {updates.length ? (
-            <ul className="flex flex-col gap-1 text-sm">
-              {updates.slice(0, 8).map((u) => (
-                <li
-                  key={u.id}
-                  className="flex items-baseline justify-between text-text-3"
-                >
-                  <span className="text-text-2">Update shipped</span>
-                  <span className="text-[11px] text-text-5">
-                    {relTime(u.detectedAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Empty>No recorded updates.</Empty>
-          )}
-        </div>
-      </div>
+
+      {upcoming.length > 0 ? (
+        <>
+          <RailHeading label={`Upcoming · ${upcoming.length}`} />
+          <Rail>
+            {upcoming.map((e) => (
+              <UpcomingEventCard key={e.eventId} event={e} />
+            ))}
+          </Rail>
+        </>
+      ) : null}
+
+      {history.length > 0 ? (
+        <>
+          <RailHeading
+            label={`Update history · ${history.length}`}
+            meta={cadenceLine ?? undefined}
+          />
+          <Rail>
+            {history.slice(0, 12).map((h) => (
+              <UpdateHistoryCard key={h.id} entry={h} />
+            ))}
+          </Rail>
+        </>
+      ) : null}
     </section>
   );
+}
+
+type HistoryEntry = {
+  id: string;
+  startUtc: number;
+  title: string;
+  thumbnailUrl: string | null;
+  ccuLift24hPct: number | null;
+};
+
+function RailHeading({ label, meta }: { label: string; meta?: string }) {
+  return (
+    <div className="mt-4 mb-2 flex items-baseline justify-between gap-3">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-4">
+        {label}
+      </span>
+      {meta ? <span className="text-xs text-text-4">{meta}</span> : null}
+    </div>
+  );
+}
+
+function Rail({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto overflow-y-hidden px-1 pb-2"
+      style={{
+        scrollSnapType: "x mandatory",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function EventThumb({ src }: { src: string | null }) {
+  return (
+    <div
+      className="block overflow-hidden"
+      style={{
+        width: "100%",
+        aspectRatio: "16 / 9",
+        background:
+          "linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))",
+      }}
+    >
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="block h-full w-full object-cover"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function fmtEventDateUtc(ms: number): string {
+  return (
+    new Date(ms).toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+    }) + " UTC"
+  );
+}
+
+function fmtHistoryDate(ms: number): string {
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function fmtRelativeDay(ms: number): string {
+  const days = Math.floor((Date.now() - ms) / DAY_MS);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day ago";
+  return `${days} days ago`;
+}
+
+function fmtCountdown(diff: number): string {
+  const days = Math.floor(diff / DAY_MS);
+  const hours = Math.floor((diff % DAY_MS) / HOUR_MS);
+  if (days > 0) return `in ${days}d ${hours}h`;
+  if (hours > 0) return `in ${hours}h`;
+  return "soon";
+}
+
+function UpcomingEventCard({ event }: { event: GameEvent }) {
+  const start = event.startUtc ? Date.parse(event.startUtc) : 0;
+  const category = pickCategory(event.categories);
+  return (
+    <article
+      className="flex flex-col overflow-hidden"
+      style={{
+        flex: "0 0 340px",
+        scrollSnapAlign: "start",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: 12,
+      }}
+    >
+      <EventThumb src={event.thumbnailUrl} />
+      <div className="flex flex-1 flex-col gap-1.5 px-4 pt-3.5 pb-4">
+        {category ? (
+          <div className="flex items-center justify-between gap-2.5">
+            <span
+              className="rounded-full border px-2 py-[3px] text-[10px] font-semibold uppercase tracking-[0.14em]"
+              style={{
+                color: "var(--lifecycle-growing)",
+                borderColor: "var(--lifecycle-growing)",
+                opacity: 0.85,
+              }}
+            >
+              {category === "newContent" ? "New content" : category}
+            </span>
+            {start ? (
+              <span className="text-[11px] tabular-nums text-text-4">
+                {fmtCountdown(start - Date.now())}
+              </span>
+            ) : null}
+          </div>
+        ) : start ? (
+          <div className="text-right text-[11px] tabular-nums text-text-4">
+            {fmtCountdown(start - Date.now())}
+          </div>
+        ) : null}
+        <div
+          className="line-clamp-2 text-text-1"
+          style={{
+            fontSize: 16,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
+            lineHeight: 1.25,
+          }}
+        >
+          {event.title ?? "Event"}
+        </div>
+        {event.subtitle ? (
+          <div className="truncate text-[13px] text-text-3">
+            {event.subtitle}
+          </div>
+        ) : null}
+        {start ? (
+          <div className="text-xs tabular-nums text-text-4">
+            {fmtEventDateUtc(start)}
+            {event.hostName ? (
+              <span className="ml-2 text-text-5">· {event.hostName}</span>
+            ) : null}
+          </div>
+        ) : null}
+        {event.tagline ? (
+          <div
+            className="mt-auto pt-2.5 text-[13px] italic leading-relaxed text-text-3"
+            style={{
+              borderTop: "1px dashed var(--border-1)",
+              fontFamily: "var(--font-serif)",
+            }}
+          >
+            {event.tagline}
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function UpdateHistoryCard({ entry }: { entry: HistoryEntry }) {
+  const lift = entry.ccuLift24hPct;
+  const fillPct =
+    lift != null ? Math.min(100, Math.abs(Math.round(lift * 100))) : 0;
+  const fillColor =
+    lift == null
+      ? "transparent"
+      : lift >= 0
+        ? "var(--lifecycle-growing)"
+        : "var(--lifecycle-declining)";
+  return (
+    <article
+      className="flex flex-col overflow-hidden"
+      style={{
+        flex: "0 0 260px",
+        scrollSnapAlign: "start",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: 12,
+      }}
+    >
+      <EventThumb src={entry.thumbnailUrl} />
+      <div className="flex flex-1 flex-col gap-1.5 px-3.5 pt-3 pb-3.5">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-4">
+          {fmtHistoryDate(entry.startUtc)} · {fmtRelativeDay(entry.startUtc)}
+        </div>
+        <div
+          className="line-clamp-2 text-text-2"
+          title={entry.title}
+          style={{
+            fontSize: 14,
+            fontWeight: 500,
+            letterSpacing: "-0.005em",
+            lineHeight: 1.3,
+          }}
+        >
+          {entry.title}
+        </div>
+        <div
+          className="mt-auto flex flex-col gap-1.5 pt-2"
+          style={{ borderTop: "1px dashed var(--border-1)" }}
+        >
+          {lift != null ? (
+            <>
+              <div
+                aria-hidden
+                className="relative overflow-hidden"
+                style={{
+                  height: 4,
+                  width: "100%",
+                  background: "var(--border-3)",
+                  borderRadius: 2,
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    width: `${fillPct}%`,
+                    background: fillColor,
+                    left: lift >= 0 ? 0 : "auto",
+                    right: lift < 0 ? 0 : "auto",
+                  }}
+                />
+              </div>
+              <div className="flex items-baseline justify-between gap-2">
+                <span
+                  className="tabular-nums text-text-2"
+                  style={{ fontSize: 13, fontWeight: 500 }}
+                >
+                  {fmtLiftPct(lift)}
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-5">
+                  24h lift
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[11px] text-text-4">Lift not measured</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-5">
+                24h lift
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function pickCategory(cats: unknown): string | null {
+  if (!Array.isArray(cats) || cats.length === 0) return null;
+  const first = cats[0];
+  return typeof first === "string" ? first : null;
+}
+
+function fmtLiftPct(p: number): string {
+  const v = Math.round(p * 100);
+  return `${v >= 0 ? "+" : ""}${v}%`;
 }
 
 function MoverSpark({
