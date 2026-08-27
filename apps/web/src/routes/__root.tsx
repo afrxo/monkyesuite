@@ -35,23 +35,51 @@ const FULL_BLEED = new Set<string>(["/", "/sign-in"]);
 // of stacking two.
 const FULL_BLEED_PREFIX = ["/projects/"];
 
+// Loader errors that cross the SSR boundary are re-hydrated as plain Errors —
+// `instanceof ApiError` returns false on the client even though the payload
+// carries a `status` field. Detect by shape so the 401 branch fires on refresh.
+function readApiStatus(err: unknown): number {
+  if (err instanceof ApiError) return err.status;
+  if (err && typeof err === "object") {
+    const rec = err as Record<string, unknown>;
+    if (typeof rec.status === "number") return rec.status;
+    // Cause chain — TanStack Start sometimes wraps rehydrated errors.
+    if (rec.cause && typeof rec.cause === "object") {
+      const inner = (rec.cause as { status?: unknown }).status;
+      if (typeof inner === "number") return inner;
+    }
+    // Last-resort message sniff — the API's 401 envelope says "unauthorized".
+    const msg = typeof rec.message === "string" ? rec.message : "";
+    if (/unauthori[sz]ed|session|sign[\s_-]?in/i.test(msg)) return 401;
+  }
+  return 0;
+}
+
 function RootErrorComponent({ error }: { error: unknown }) {
-  const status = error instanceof ApiError ? error.status : 0;
+  const status = readApiStatus(error);
   const message =
     error instanceof Error ? error.message : "An unexpected error occurred.";
   const navigate = useNavigate();
+  if (typeof console !== "undefined" && status === 0) {
+    console.warn("[RootErrorComponent] unknown error shape", error);
+  }
 
   // A 401 from a route loader means the session expired between paints — the
   // loader still ran (AuthGate lives inside the Layout that errorComponent
   // replaces, so it never got a chance to gate). Redirect immediately: reload
-  // just re-runs the failing loader and reproduces this screen. The `useEffect`
-  // fires on mount, so the link below is only visible for the paint before the
-  // navigate resolves — kept as a fallback if router navigation is disabled.
+  // just re-runs the failing loader and reproduces this screen.
+  //
+  // Hard `window.location.replace` rather than router navigate: the error
+  // component may render server-side, and the failing loader is cached in the
+  // router's error state — a soft navigate lands back here on the next
+  // interaction. A hard nav wipes both.
   useEffect(() => {
-    if (status === 401) {
-      navigate({ to: "/sign-in", replace: true });
-    }
-  }, [status, navigate]);
+    if (status !== 401) return;
+    if (typeof window === "undefined") return;
+    if (window.location.pathname === "/sign-in") return;
+    window.location.replace("/sign-in");
+  }, [status]);
+  void navigate;
 
   if (status === 401) {
     return (
