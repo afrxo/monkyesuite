@@ -136,22 +136,38 @@ func eventsMetrics(bucket int64, gamesPolled, eventsUpserted int) map[string]any
 	}
 }
 
-// resolveThumbnail resolves the first thumbnail mediaId to a CDN URL. The
-// per-event warn was moved to Debug because a rate-limited tick logs one per
-// event and floors Railway's 500/sec cap. Failures are non-fatal (the row
-// still upserts without a thumbnail), so the debug drop-in loses no signal
-// the system acts on.
+// resolveThumbnail asks Roblox for CDN URLs for every mediaId the event ships
+// with and picks the first that resolves "Completed". The batch endpoint takes
+// all ids in one call, so fanning out beyond mediaId[0] costs nothing extra
+// vs. the previous single-shot resolve — but recovers the thumbnail when the
+// first asset is still Pending / Blocked / InReview (a common state for events
+// posted minutes ago). Row upsert coalesces null resolves onto the prior
+// stored URL, so a failed resolve on tick N doesn't wipe a good URL from
+// tick N-1. Per-event slog stays at Debug so a rate-limited tick doesn't
+// floor Railway's log cap.
 func (j *eventsJob) resolveThumbnail(ctx context.Context, row *store.GameEvent, e roblox.VirtualEvent) {
-	if len(e.Thumbnails) == 0 || e.Thumbnails[0].MediaID == 0 {
+	ids := make([]int64, 0, len(e.Thumbnails))
+	for _, t := range e.Thumbnails {
+		if t.MediaID != 0 {
+			ids = append(ids, t.MediaID)
+		}
+	}
+	if len(ids) == 0 {
 		return
 	}
-	urls, err := j.d.Client.GetAssetThumbnails(ctx, []int64{e.Thumbnails[0].MediaID})
+	urls, err := j.d.Client.GetAssetThumbnails(ctx, ids)
 	if err != nil {
 		slog.Debug("events: thumbnail resolve failed", "event", e.ID, "err", err)
 		return
 	}
-	if u, ok := urls[e.Thumbnails[0].MediaID]; ok {
-		row.ThumbnailURL = u
+	// Preserve the event's own ordering — the first mediaId is Roblox's
+	// preferred cover art; only fall back to later ones when it hasn't
+	// resolved yet.
+	for _, id := range ids {
+		if u, ok := urls[id]; ok && u != "" {
+			row.ThumbnailURL = u
+			return
+		}
 	}
 }
 
