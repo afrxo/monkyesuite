@@ -39,6 +39,19 @@ function RootErrorComponent({ error }: { error: unknown }) {
   const status = error instanceof ApiError ? error.status : 0;
   const message =
     error instanceof Error ? error.message : "An unexpected error occurred.";
+  const navigate = useNavigate();
+
+  // A 401 from a route loader means the session expired between paints — the
+  // loader still ran (AuthGate lives inside the Layout that errorComponent
+  // replaces, so it never got a chance to gate). Redirect immediately: reload
+  // just re-runs the failing loader and reproduces this screen. The `useEffect`
+  // fires on mount, so the link below is only visible for the paint before the
+  // navigate resolves — kept as a fallback if router navigation is disabled.
+  useEffect(() => {
+    if (status === 401) {
+      navigate({ to: "/sign-in", replace: true });
+    }
+  }, [status, navigate]);
 
   if (status === 401) {
     return (
@@ -49,7 +62,7 @@ function RootErrorComponent({ error }: { error: unknown }) {
         <div className="flex flex-col gap-1">
           <p className="text-base font-semibold text-text-1">Sign in required</p>
           <p className="text-sm text-text-4">
-            Your session expired or you're not signed in.
+            Redirecting to sign-in…
           </p>
         </div>
         <Link
