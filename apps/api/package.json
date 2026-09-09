@@ -18,7 +18,7 @@
     "@monkyesuite/shared": "workspace:*",
     "better-auth": "1.6.27",
     "drizzle-orm": "0.45.2",
-    "hono": "4.13.1",
+    "hono": "4.13.5",
     "htmx.org": "^2.0.10",
     "marked": "^18.0.9",
     "zod": "3.25.76"
